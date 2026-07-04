@@ -1,0 +1,20 @@
+testsuites:
+- testcases:
+    - id: TC_id_1
+      desc: TC_xxx
+      result: blocked
+      start_time: '2026-06-10 00:25:26'
+      end_time: '2026-06-10 00:25:38'
+      fail_detail: 'some python error trace stack'
+    - id: TC_id_2
+      desc: TC_xxx
+      result: blocked
+      start_time: '2026-06-10 00:26:23'
+      end_time: '2026-06-10 00:26:38'
+      fail_detail: 'some python error trace stack'
+  result: failed
+  id: TS_id
+  desc: TS_name
+  start_time: '2026-06-10 00:25:23'
+  end_time: '2026-06-10 00:28:38'
+  fail_detail: 'some failed detail string'

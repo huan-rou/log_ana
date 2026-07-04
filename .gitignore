@@ -1,0 +1,63 @@
+# OS / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+backend/.venv/
+backend/venv/
+backend/env/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.angular/
+.vite/
+.cache/
+.parcel-cache/
+frontend/.next/
+frontend/.nuxt/
+
+# Project-specific
+data/
+.git/
+
+# AI agent related (local only, not for version tracking)
+cx.txt
+reasonix.toml
+.claude/
+.codewhale/
+.deepseek/
+.reasonix/
+.reasionix/
+.codebuddy/
+.cursor/
+.aider/
+.windsurf/
+.trae/
+.gemini/
+.continue/
+.tabnine/
+.cody/
+.github/copilot/

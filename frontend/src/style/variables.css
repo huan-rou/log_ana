@@ -1,0 +1,145 @@
+/* ── Tauri 风格全局变量 ── */
+:root {
+  /* 基础 */
+  --font-size: 13px;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+
+  /* 颜色 - Light */
+  --bg-root: #f0f0f3;
+  --bg-panel: #ffffff;
+  --bg-sidebar: #e8e8ec;
+  --bg-titlebar: #f5f5f7;
+  --bg-statusbar: #f0f0f3;
+  --bg-input: #f5f5f7;
+  --bg-hover: #e8e8ec;
+  --bg-active: #dcdce0;
+
+  --border-color: #d4d4d8;
+  --border-light: #e8e8ec;
+
+  --text-primary: #3a3a3e;
+  --text-secondary: #909099;
+  --text-muted: #b0b0b8;
+  --text-inverse: #ffffff;
+
+  --color-primary: #4a9eff;
+  --color-success: #4ec94e;
+  --color-warning: #e6a23c;
+  --color-error: #f56c6c;
+  --color-info: #909399;
+
+  /* 圆角 */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+
+  /* 阴影 - 无或极轻 */
+  --shadow: none;
+  --shadow-hover: 0 1px 3px rgba(0,0,0,0.08);
+
+  /* 组件尺寸 */
+  --toolbar-h: 32px;
+  --statusbar-h: 24px;
+  --sidebar-w: 40px;
+  --tree-w: 280px;
+}
+
+/* ── Element Plus 变量覆盖 ── */
+:root {
+  --el-font-size-base: 13px;
+  --el-font-size-small: 12px;
+  --el-font-size-extra-small: 11px;
+
+  --el-border-radius-base: var(--radius-sm);
+  --el-border-radius-small: 1px;
+  --el-border-radius-round: 12px;
+
+  --el-box-shadow-light: none;
+  --el-box-shadow: none;
+  --el-box-shadow-dark: none;
+
+  --el-component-size: 28px;
+  --el-component-size-small: 24px;
+  --el-component-size-large: 36px;
+
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: #6eb5ff;
+  --el-color-primary-light-5: #93cbff;
+  --el-color-primary-light-7: #b8dfff;
+  --el-color-primary-light-9: #ddf0ff;
+
+  --el-color-success: var(--color-success);
+  --el-color-warning: var(--color-warning);
+  --el-color-danger: var(--color-error);
+
+  --el-bg-color: var(--bg-panel);
+  --el-bg-color-overlay: #ffffff;
+  --el-border-color: var(--border-color);
+  --el-border-color-light: var(--border-light);
+  --el-fill-color-blank: var(--bg-input);
+
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-primary);
+  --el-text-color-secondary: var(--text-secondary);
+  --el-text-color-placeholder: var(--text-muted);
+
+  --el-menu-item-height: 32px;
+  --el-menu-base-level-padding: 8px;
+  --el-menu-level-padding: 16px;
+
+  --el-table-header-bg-color: #f5f5f7;
+  --el-table-row-hover-bg-color: #f5f5f7;
+  --el-table-border-color: var(--border-light);
+
+  --el-tabs-header-height: 32px;
+
+  --el-dialog-padding-primary: 16px;
+  --el-message-close-size: 14px;
+}
+
+/* ── 全局重置 ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #app {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  color: var(--text-primary);
+  background: var(--bg-root);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* 选中 */
+::selection {
+  background: var(--color-primary);
+  color: var(--text-inverse);
+}
