@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { taskApi, browseApi } from '@/api'
 import { ElMessageBox } from 'element-plus'
+import AppPageHeader from '@/components/layout/AppPageHeader.vue'
+import AppSection from '@/components/layout/AppSection.vue'
 
 const router = useRouter()
 
@@ -137,15 +139,17 @@ onMounted(loadTasks)
 </script>
 
 <template>
-  <div class="task-list">
-    <div class="page-header">
-      <h2>任务列表</h2>
-      <div class="header-actions">
+  <div class="page task-list">
+    <AppPageHeader
+      title="任务列表"
+      subtitle="创建分析任务、查看运行状态、跳转查看详细分析结果"
+    >
+      <template #actions>
         <el-select
           v-model="statusFilter"
-          placeholder="状态筛选"
+          placeholder="按状态筛选"
           clearable
-          style="width: 140px; margin-right: 12px"
+          style="width: 160px"
           @change="loadTasks"
         >
           <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
@@ -154,56 +158,86 @@ onMounted(loadTasks)
           <el-icon><Plus /></el-icon>
           新建任务
         </el-button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
-    <el-table :data="tasks" v-loading="loading" stripe style="width: 100%">
-      <el-table-column prop="name" label="任务名称" min-width="200">
-        <template #default="{ row }">
-          <el-link type="primary" @click="openTask(row)">{{ row.name }}</el-link>
-        </template>
-      </el-table-column>
-      <el-table-column prop="status" label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="statusTagType[row.status]" size="small">
-            {{ statusLabel[row.status] || row.status }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="source_type" label="来源" width="90">
-        <template #default="{ row }">
-          <el-tag size="small" :type="row.source_type === 's3' ? '' : 'info'">
-            {{ row.source_type === 's3' ? 'S3' : '上传' }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column label="S3 路径" min-width="180" show-overflow-tooltip>
-        <template #default="{ row }">
-          <span v-if="row.source_type === 's3'" class="s3-path">
-            {{ row.package_version }}/{{ row.automation_task_id }}/{{ row.node_id }}/{{ row.task_block_id }}
-          </span>
-          <span v-else class="text-muted">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="total_entries" label="日志行数" width="90" />
-      <el-table-column label="失败/已分类/未识别" width="220">
-        <template #default="{ row }">
-          <div class="counts-cell">
-            <span class="count-item err">{{ row.failure_count || 0 }}</span>
-            <span class="sep">/</span>
-            <span class="count-item ok">{{ row.classified_count || 0 }}</span>
-            <span class="sep">/</span>
-            <span class="count-item unk">{{ row.unrecognized_count || 0 }}</span>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="180" />
-      <el-table-column label="操作" width="100" fixed="right">
-        <template #default="{ row }">
-          <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <AppSection title="任务" :hint="`共 ${total} 条`">
+      <el-table :data="tasks" v-loading="loading" stripe class="data-table">
+        <el-table-column label="任务名称" min-width="220">
+          <template #header>
+            <el-tooltip content="点击任务名进入详情页" placement="top">
+              <span>任务名称</span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">
+            <el-link type="primary" @click="openTask(row)">{{ row.name }}</el-link>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #header>
+            <el-tooltip content="任务当前生命周期阶段" placement="top">
+              <span>状态</span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">
+            <el-tag :type="statusTagType[row.status]" size="small">
+              {{ statusLabel[row.status] || row.status }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="来源" width="90">
+          <template #header>
+            <el-tooltip content="数据来源：本地上传 / S3 (RustFS)" placement="top">
+              <span>来源</span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.source_type === 's3' ? '' : 'info'">
+              {{ row.source_type === 's3' ? 'S3' : '上传' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="S3 路径" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.source_type === 's3'" class="s3-path">
+              {{ row.package_version }}/{{ row.automation_task_id }}/{{ row.node_id }}/{{ row.task_block_id }}
+            </span>
+            <span v-else class="text-muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="日志行数" width="100" align="right">
+          <template #default="{ row }">
+            <span class="num">{{ (row.total_entries || 0).toLocaleString() }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="失败/已分类/未识别" min-width="180" align="center">
+          <template #header>
+            <el-tooltip content="三类计数：失败事件 / 已分类 / 未识别" placement="top">
+              <span>失败/已分类/未识别</span>
+            </el-tooltip>
+          </template>
+          <template #default="{ row }">
+            <div class="counts-cell">
+              <span class="count-item err">{{ row.failure_count || 0 }}</span>
+              <span class="sep">/</span>
+              <span class="count-item ok">{{ row.classified_count || 0 }}</span>
+              <span class="sep">/</span>
+              <span class="count-item unk">{{ row.unrecognized_count || 0 }}</span>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="text-muted">{{ row.created_at }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right" align="center">
+          <template #default="{ row }">
+            <el-button link type="danger" size="small" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </AppSection>
 
     <!-- Create Dialog -->
     <el-dialog v-model="showCreate" title="新建分析任务" width="520px" top="8vh">
@@ -267,74 +301,71 @@ onMounted(loadTasks)
 
 <style scoped>
 .task-list {
-  padding: var(--space-xl);
-  height: 100%;
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
+  max-width: 1400px;
 }
 
-.page-header h2 {
-  font-size: 20px;
-  font-weight: 600;
+.data-table :deep(.el-table__row) {
+  height: var(--table-row-h);
 }
-
-.header-actions {
-  display: flex;
-  align-items: center;
+.data-table :deep(.el-table__cell) {
+  padding-block: var(--table-cell-py);
 }
 
 .counts-cell {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
-
-.count-item.err { color: #f56c6c; }
-.count-item.ok { color: #67c23a; }
-.count-item.unk { color: #e6a23c; }
-.sep { color: #c0c4cc; margin: 0 4px; }
+.count-item.err { color: var(--color-error); }
+.count-item.ok  { color: var(--color-success); }
+.count-item.unk { color: var(--color-warning); }
+.sep { color: var(--border-color); margin: 0 2px; }
 
 .s3-path {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-small);
   color: var(--text-secondary);
 }
 .text-muted { color: var(--text-muted); }
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
 .form-tip {
-  font-size: 12px;
+  font-size: var(--text-small);
   color: var(--text-muted);
-  margin-top: 4px;
+  margin-top: var(--space-xs);
 }
 
 /* ── S3 compact form ── */
-.create-form :deep(.el-form-item) { margin-bottom: 12px; }
-.s3-grid :deep(.el-form-item.compact) { margin-bottom: 6px; }
-.s3-grid :deep(.el-form-item.compact .el-form-item__label) { font-size: 12px; }
+.create-form :deep(.el-form-item) { margin-bottom: var(--space-card); }
+.s3-grid :deep(.el-form-item.compact) { margin-bottom: var(--space-sm); }
+.s3-grid :deep(.el-form-item.compact .el-form-item__label) { font-size: var(--text-small); }
 .s3-grid :deep(.el-form-item.opt .el-form-item__label) { color: var(--text-muted); }
 
 .input-pair {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--space-xs);
   width: 100%;
 }
 .input-pair .half { flex: 1; }
-.sep-slash { color: var(--text-muted); font-size: 14px; flex-shrink: 0; }
+.sep-slash { color: var(--text-muted); font-size: var(--text-body); flex-shrink: 0; }
 
 .s3-path-preview {
-  margin-top: 8px;
-  padding: 6px 10px;
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
   background: var(--bg-input);
   border-radius: var(--radius-sm);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-tiny);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

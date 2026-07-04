@@ -11,6 +11,15 @@
   --space-md: 8px;
   --space-lg: 12px;
   --space-xl: 16px;
+  --space-2xl: 20px;
+  --space-3xl: 24px;
+
+  /* 页面节奏 */
+  --page-py: 16px;
+  --page-px: 20px;
+  --space-section: 20px;   /* section 之间 */
+  --space-card: 12px;      /* section 内部卡片之间 */
+  --space-row: 8px;        /* 通用行间距 */
 
   /* 颜色 - Light */
   --bg-root: #f0f0f3;
@@ -46,10 +55,30 @@
   --shadow-hover: 0 1px 3px rgba(0,0,0,0.08);
 
   /* 组件尺寸 */
-  --toolbar-h: 32px;
+  --toolbar-h: 36px;            /* titlebar 加高一点放面包屑 */
   --statusbar-h: 24px;
-  --sidebar-w: 40px;
+  --sidebar-w: 224px;           /* 默认展开 */
+  --sidebar-w-collapsed: 56px;  /* 折叠态：只露图标 */
   --tree-w: 280px;
+
+  /* 排版 - 标题/正文 */
+  --text-h1: 20px;   /* 页面标题 */
+  --text-h2: 16px;   /* section 标题 */
+  --text-h3: 14px;   /* 卡片标题 */
+  --text-body: 13px; /* 默认 */
+  --text-small: 12px;
+  --text-tiny: 11px;
+
+  --weight-h: 600;
+  --weight-body: 400;
+  --weight-muted: 400;
+
+  /* 表格密度 */
+  --table-row-h: 32px;
+  --table-cell-py: 4px;
+  --table-cell-px: 8px;
+  --table-header-py: 6px;
+  --table-header-px: 8px;
 }
 
 /* ── Element Plus 变量覆盖 ── */
@@ -98,6 +127,8 @@
   --el-table-header-bg-color: #f5f5f7;
   --el-table-row-hover-bg-color: #f5f5f7;
   --el-table-border-color: var(--border-light);
+  --el-table-header-text-color: var(--text-secondary);
+  --el-table-cell-padding-block: var(--table-cell-py);
 
   --el-tabs-header-height: 32px;
 
@@ -142,4 +173,40 @@ html, body, #app {
 ::selection {
   background: var(--color-primary);
   color: var(--text-inverse);
+}
+
+/* ── 全局页面壳工具类（业务 view 可选消费） ── */
+.page {
+  padding: var(--page-py) var(--page-px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-section);
+}
+.page--scroll {
+  height: 100%;
+  overflow-y: auto;
+}
+.page-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-card);
+}
+.page-section__title {
+  font-size: var(--text-h2);
+  font-weight: var(--weight-h);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+.page-section__title .meta {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  font-weight: var(--weight-body);
+}
+.page-section__hint {
+  font-size: var(--text-tiny);
+  color: var(--text-muted);
+  font-weight: var(--weight-body);
 }

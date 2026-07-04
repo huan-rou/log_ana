@@ -2,6 +2,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '@/api'
+import AppPageHeader from '@/components/layout/AppPageHeader.vue'
+import AppSection from '@/components/layout/AppSection.vue'
 
 const versions = ref([])
 const selectedVersionId = ref(null)
@@ -132,7 +134,6 @@ async function handleSavePurpose() {
     return
   }
 
-  // Parse taskRefs from text: "task_id:round" per line, or just "task_id"
   const taskRefs = purposeForm.value.taskRefsText
     .split('\n')
     .map((line) => line.trim())
@@ -194,7 +195,6 @@ async function handleStats(purpose) {
   }
 }
 
-// ── Create task from purpose ──
 const taskDialogVisible = ref(false)
 const taskPurposeName = ref('')
 const taskPurposeId = ref(null)
@@ -227,21 +227,21 @@ async function handleCreateTask() {
 </script>
 
 <template>
-  <div class="mapping-manager">
-    <div class="page-header">
-      <h2>任务映射管理</h2>
-      <el-button type="primary" @click="openCreateVersion">
-        <el-icon><Plus /></el-icon> 创建版本
-      </el-button>
-    </div>
+  <div class="page mapping-manager">
+    <AppPageHeader
+      title="任务映射管理"
+      subtitle="按测试版本与测试目的批量管理 S3 分析任务"
+    >
+      <template #actions>
+        <el-button type="primary" @click="openCreateVersion">
+          <el-icon><Plus /></el-icon> 创建版本
+        </el-button>
+      </template>
+    </AppPageHeader>
 
     <el-row :gutter="16">
-      <!-- Version sidebar -->
       <el-col :span="5">
-        <el-card>
-          <template #header>
-            <span>测试版本</span>
-          </template>
+        <AppSection title="测试版本" hint="点击切换">
           <div class="version-list" v-loading="loading">
             <div
               v-for="ver in versions"
@@ -254,27 +254,26 @@ async function handleCreateTask() {
             </div>
             <el-empty v-if="!versions.length" description="暂无版本" :image-size="40" />
           </div>
-        </el-card>
+        </AppSection>
       </el-col>
 
-      <!-- Purposes -->
       <el-col :span="19">
-        <el-card v-if="selectedVersion">
+        <AppSection
+          v-if="selectedVersion"
+          :title="`测试目的 — ${selectedVersion.version_name}`"
+          hint="点击行内按钮进行编辑、统计或创建任务"
+        >
           <template #header>
-            <div class="purpose-header">
-              <span>测试目的 — {{ selectedVersion.version_name }}</span>
-              <div>
-                <el-button size="small" @click="handleDiscover" :loading="discovering">
-                  <el-icon><Search /></el-icon> 发现 S3 任务
-                </el-button>
-                <el-button size="small" type="primary" @click="openCreatePurpose">
-                  <el-icon><Plus /></el-icon> 创建目的
-                </el-button>
-              </div>
+            <div class="purpose-actions">
+              <el-button size="small" @click="handleDiscover" :loading="discovering">
+                <el-icon><Search /></el-icon> 发现 S3 任务
+              </el-button>
+              <el-button size="small" type="primary" @click="openCreatePurpose">
+                <el-icon><Plus /></el-icon> 创建目的
+              </el-button>
             </div>
           </template>
 
-          <!-- Discovered task IDs -->
           <div v-if="discoveredVersionId === selectedVersion.id" class="discovered-box">
             <template v-if="discoveredError">
               <el-alert :title="discoveredError" type="warning" closable style="margin-bottom: 12px" />
@@ -301,10 +300,13 @@ async function handleCreateTask() {
             </template>
           </div>
 
-          <!-- Purposes table -->
-          <el-table :data="purposes" v-loading="purposesLoading" stripe empty-text="暂无测试目的">
-            <el-table-column prop="name" label="测试目的" min-width="200" show-overflow-tooltip />
-            <el-table-column prop="environment" label="执行环境" width="160" show-overflow-tooltip />
+          <el-table :data="purposes" v-loading="purposesLoading" stripe empty-text="暂无测试目的" class="data-table">
+            <el-table-column label="测试目的" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="strong">{{ row.name }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="environment" label="执行环境" min-width="140" show-overflow-tooltip />
             <el-table-column label="关联任务数" width="100" align="center">
               <template #default="{ row }">
                 <el-tag size="small">{{ (row.task_refs || []).length }}</el-tag>
@@ -313,16 +315,16 @@ async function handleCreateTask() {
             <el-table-column label="轮次范围" width="120" align="center">
               <template #default="{ row }">
                 <template v-if="row.task_refs && row.task_refs.length">
-                  <span style="font-size: 12px">
+                  <span class="num">
                     #{{ Math.min(...row.task_refs.map((t) => t.round_number)) }}
                     ~
                     #{{ Math.max(...row.task_refs.map((t) => t.round_number)) }}
                   </span>
                 </template>
-                <span v-else style="color: #c0c4cc">—</span>
+                <span v-else class="text-muted">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="TASK ID 列表" min-width="280">
+            <el-table-column label="TASK ID 列表" min-width="280" show-overflow-tooltip>
               <template #default="{ row }">
                 <div class="task-refs-cell">
                   <el-tag
@@ -334,11 +336,11 @@ async function handleCreateTask() {
                   >
                     {{ tr.task_id }} <template v-if="tr.round_number > 1">(#{{ tr.round_number }})</template>
                   </el-tag>
-                  <span v-if="!row.task_refs || !row.task_refs.length" style="color: #c0c4cc">—</span>
+                  <span v-if="!row.task_refs || !row.task_refs.length" class="text-muted">—</span>
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="140" fixed="right">
+            <el-table-column label="操作" width="220" fixed="right" align="center">
               <template #default="{ row }">
                 <el-button link type="primary" size="small" @click="openEditPurpose(row)">编辑</el-button>
                 <el-button link type="success" size="small" @click="openCreateTask(row)">创建任务</el-button>
@@ -347,9 +349,9 @@ async function handleCreateTask() {
               </template>
             </el-table-column>
           </el-table>
-        </el-card>
+        </AppSection>
 
-        <el-empty v-else description="请选择或创建一个版本" style="margin-top: 80px" />
+        <AppSection v-else title="" hint="请选择或创建一个测试版本" />
       </el-col>
     </el-row>
 
@@ -402,12 +404,12 @@ async function handleCreateTask() {
           <el-row :gutter="14" style="margin-bottom: 16px">
             <el-col :span="6"><div class="s-stat"><span class="s-num">{{ statsData.total_testsuite_files }}</span><span class="s-label">测试套文件</span></div></el-col>
             <el-col :span="6"><div class="s-stat"><span class="s-num">{{ statsData.total_testcase_files }}</span><span class="s-label">测试用例文件</span></div></el-col>
-            <el-col :span="6"><div class="s-stat"><span class="s-num" style="color:#67c23a">{{ statsData.auto_analyzed }}</span><span class="s-label">自动分析 {{ statsData.auto_analyzed_pct }}%</span></div></el-col>
-            <el-col :span="6"><div class="s-stat"><span class="s-num" style="color:#409eff">{{ statsData.human_reviewed }}</span><span class="s-label">人工已审核</span></div></el-col>
+            <el-col :span="6"><div class="s-stat"><span class="s-num success">{{ statsData.auto_analyzed }}</span><span class="s-label">自动分析 {{ statsData.auto_analyzed_pct }}%</span></div></el-col>
+            <el-col :span="6"><div class="s-stat"><span class="s-num primary">{{ statsData.human_reviewed }}</span><span class="s-label">人工已审核</span></div></el-col>
           </el-row>
           <el-row :gutter="14" style="margin-bottom: 16px">
-            <el-col :span="6"><div class="s-stat"><span class="s-num" style="color:#e6a23c">{{ statsData.human_overridden }}</span><span class="s-label">人工已覆盖</span></div></el-col>
-            <el-col :span="6"><div class="s-stat"><span class="s-num" style="color:#f56c6c">{{ statsData.remaining_unreviewed }}</span><span class="s-label">尚未审核</span></div></el-col>
+            <el-col :span="6"><div class="s-stat"><span class="s-num warning">{{ statsData.human_overridden }}</span><span class="s-label">人工已覆盖</span></div></el-col>
+            <el-col :span="6"><div class="s-stat"><span class="s-num danger">{{ statsData.remaining_unreviewed }}</span><span class="s-label">尚未审核</span></div></el-col>
             <el-col :span="6"><div class="s-stat"><span class="s-num">{{ statsData.task_count }}</span><span class="s-label">关联任务</span></div></el-col>
           </el-row>
 
@@ -447,73 +449,66 @@ async function handleCreateTask() {
 <style scoped>
 .mapping-manager {
   max-width: 1400px;
-  padding: var(--space-xl);
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.page-header h2 {
-  font-size: 20px;
-  font-weight: 600;
 }
 
 .version-list {
   min-height: 200px;
   max-height: 600px;
   overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
 }
 .version-item {
-  padding: 10px 12px;
-  border-radius: 6px;
+  padding: var(--space-md) var(--space-lg);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-md);
   margin-bottom: 2px;
   transition: background 0.1s;
 }
 .version-item:hover {
-  background: #f0f2f5;
+  background: var(--bg-hover);
 }
 .version-item.active {
   background: var(--color-primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 .version-name {
-  font-size: 13px;
+  font-size: var(--text-body);
   font-weight: 500;
 }
-.version-badge {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  background: rgba(255,255,255,0.3);
-}
-.version-item.active .version-badge {
-  background: rgba(255,255,255,0.3);
-  color: #fff;
+
+.purpose-actions {
+  display: flex;
+  gap: var(--space-sm);
 }
 
-.purpose-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.data-table :deep(.el-table__row) {
+  height: var(--table-row-h);
 }
+.data-table :deep(.el-table__cell) {
+  padding-block: var(--table-cell-py);
+}
+
+.strong { font-weight: 500; color: var(--text-primary); }
+.num { font-family: var(--font-mono); font-size: var(--text-small); }
+.text-muted { color: var(--text-muted); }
 
 .discovered-box {
   background: #f0f9eb;
   border: 1px solid #e1f3d8;
-  border-radius: 6px;
-  padding: 10px 14px;
-  margin-bottom: 14px;
+  border-radius: var(--radius-md);
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
 }
 .discovered-title {
-  font-size: 13px;
-  color: #67c23a;
-  margin-bottom: 8px;
+  font-size: var(--text-body);
+  color: var(--color-success);
+  margin-bottom: var(--space-md);
   font-weight: 500;
 }
 .discovered-tags {
@@ -528,27 +523,32 @@ async function handleCreateTask() {
 }
 
 .form-hint {
-  font-size: 11px;
-  color: #c0c4cc;
-  margin-top: 4px;
+  font-size: var(--text-tiny);
+  color: var(--text-muted);
+  margin-top: var(--space-xs);
 }
 
 .s-stat {
   text-align: center;
-  padding: 10px 4px;
-  background: #f8f9fa;
-  border-radius: 6px;
+  padding: var(--space-md) var(--space-xs);
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
 }
 .s-num {
   display: block;
   font-size: 22px;
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
 .s-label {
   display: block;
-  font-size: 11px;
-  color: #909399;
+  font-size: var(--text-tiny);
+  color: var(--text-secondary);
   margin-top: 2px;
 }
+.s-num.success { color: var(--color-success); }
+.s-num.primary { color: var(--color-primary); }
+.s-num.warning { color: var(--color-warning); }
+.s-num.danger  { color: var(--color-error); }
 </style>

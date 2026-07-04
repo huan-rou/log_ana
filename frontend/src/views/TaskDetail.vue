@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { taskApi, logApi, analysisApi } from '@/api'
 import ReviewDrawer from '@/components/ReviewDrawer.vue'
 import TreeNode from '@/components/TreeNode.vue'
+import AppPageHeader from '@/components/layout/AppPageHeader.vue'
+import AppSection from '@/components/layout/AppSection.vue'
 
 const route = useRoute()
 const taskId = route.params.id
@@ -29,8 +31,8 @@ const files = ref([])
 const filesLoading = ref(false)
 const statusFilter = ref('')
 const typeFilter = ref('')
-const fallbackFilter = ref(null)  // null=全部 true=仅未识别 false=仅已识别
-const summaryFilter = ref('')     // ''=全部 'success'|'failed'|'blocked'
+const fallbackFilter = ref(null)
+const summaryFilter = ref('')
 
 // ── Review drawer ──
 const drawerVisible = ref(false)
@@ -370,30 +372,31 @@ const explorerFileTitle = computed(() => {
   return identity ? `${identity} · ${file.name}` : file.name
 })
 const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
+
+const s3PathText = computed(() => {
+  if (!task.value) return ''
+  return task.value.s3_path || `${task.value.package_version}/${task.value.automation_task_id}/${task.value.node_id}/${task.value.task_block_id}`
+})
 </script>
 
 <template>
-  <div class="task-detail" v-loading="loading">
-    <!-- Header -->
-    <div class="page-header">
-      <div>
-        <h2>{{ task?.name || '加载中...' }}</h2>
-        <div class="task-meta">
-          <el-tag :type="statusTag(task?.status)">{{ statusLabel(task?.status) }}</el-tag>
-          <el-tag size="small" :type="task?.source_type === 's3' ? '' : 'info'" style="margin-left:8px">
-            {{ task?.source_type === 's3' ? 'S3' : '本地上传' }}
-          </el-tag>
-          <span v-if="task?.source_type === 's3'" class="meta-item mono">
-            {{ task?.s3_path || task?.package_version + '/' + task?.automation_task_id + '/' + task?.node_id + '/' + task?.task_block_id }}
-          </span>
-          <span class="meta-item">创建: {{ task?.created_at }}</span>
-          <span v-if="task?.completed_at" class="meta-item">完成: {{ task?.completed_at }}</span>
-        </div>
-        <div v-if="task?.error_message" class="error-msg">
-          <el-alert :title="task.error_message" type="error" :closable="false" />
-        </div>
-      </div>
-      <div class="header-actions">
+  <div class="page task-detail" v-loading="loading">
+    <AppPageHeader
+      :title="task?.name || '加载中...'"
+      :subtitle="task ? `${fileStats.total} 个文件 · ${fileStats.failed} 个失败 · ${fileStats.reviewed} 已审核` : ''"
+    >
+      <template #meta>
+        <el-tag v-if="task" :type="statusTag(task.status)">{{ statusLabel(task.status) }}</el-tag>
+        <el-tag v-if="task" size="small" :type="task.source_type === 's3' ? '' : 'info'">
+          {{ task.source_type === 's3' ? 'S3' : '本地上传' }}
+        </el-tag>
+        <span v-if="task?.source_type === 's3'" class="meta-item mono" :title="s3PathText">
+          {{ s3PathText }}
+        </span>
+        <span v-if="task" class="meta-item">创建: {{ task.created_at }}</span>
+        <span v-if="task?.completed_at" class="meta-item">完成: {{ task.completed_at }}</span>
+      </template>
+      <template #actions>
         <el-button
           v-if="canStartTask"
           type="primary"
@@ -403,80 +406,113 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
           <el-icon><VideoPlay /></el-icon>
           运行分析
         </el-button>
-      </div>
-    </div>
+      </template>
+    </AppPageHeader>
 
-    <!-- Stats -->
-    <el-row :gutter="16" class="stats-row" v-if="task">
-      <el-col :span="6">
-        <div class="mini-stat">
-          <span class="mini-stat-num">{{ fileStats.total }}</span>
-          <span class="mini-stat-label">日志文件</span>
-        </div>
-      </el-col>
-      <el-col :span="6">
-        <div class="mini-stat error">
-          <span class="mini-stat-num">{{ fileStats.failed }}</span>
-          <span class="mini-stat-label">失败文件</span>
-        </div>
-      </el-col>
-      <el-col :span="6">
-        <div class="mini-stat success">
-          <span class="mini-stat-num">{{ fileStats.reviewed }} / {{ fileStats.total }}</span>
-          <span class="mini-stat-label">已审核</span>
-        </div>
-      </el-col>
-      <el-col :span="6">
-        <div class="mini-stat warning" :class="{ active: fallbackFilter === true }" @click="filterUnrecognized">
-          <span class="mini-stat-num">{{ fileStats.unrecognized }}</span>
-          <span class="mini-stat-label">未识别</span>
-        </div>
-      </el-col>
-    </el-row>
+    <el-alert
+      v-if="task?.error_message"
+      :title="task.error_message"
+      type="error"
+      :closable="false"
+      class="error-msg"
+    />
 
-    <!-- Content Tabs -->
-    <el-card style="margin-top: 16px">
+    <AppSection title="任务概览" v-if="task">
+      <el-row :gutter="16" class="stat-row">
+        <el-col :span="6">
+          <div class="mini-stat">
+            <span class="mini-stat-num">{{ fileStats.total }}</span>
+            <span class="mini-stat-label">日志文件</span>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="mini-stat error">
+            <span class="mini-stat-num">{{ fileStats.failed }}</span>
+            <span class="mini-stat-label">失败文件</span>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div class="mini-stat success">
+            <span class="mini-stat-num">{{ fileStats.reviewed }} / {{ fileStats.total }}</span>
+            <span class="mini-stat-label">已审核</span>
+          </div>
+        </el-col>
+        <el-col :span="6">
+          <div
+            class="mini-stat warning clickable"
+            :class="{ active: fallbackFilter === true }"
+            @click="filterUnrecognized"
+            title="点击只看未识别文件"
+          >
+            <span class="mini-stat-num">{{ fileStats.unrecognized }}</span>
+            <span class="mini-stat-label">未识别</span>
+          </div>
+        </el-col>
+      </el-row>
+    </AppSection>
+
+    <AppSection title="分析详情" hint="切换 Tab 查看不同维度的数据">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
         <!-- Analyzed Files Tab -->
         <el-tab-pane label="分析结果" name="files">
           <div class="results-toolbar">
-            <el-select v-model="statusFilter" placeholder="审核状态" clearable style="width: 140px" @change="loadFiles">
-              <el-option label="待审核" value="pending" />
-              <el-option label="已确认" value="confirmed" />
-              <el-option label="已覆盖" value="overridden" />
-            </el-select>
-            <el-select v-model="typeFilter" placeholder="文件类型" clearable style="width: 140px; margin-left: 8px" @change="loadFiles">
-              <el-option label="测试套" value="testsuite" />
-              <el-option label="测试用例" value="testcase" />
-              <el-option label="任务日志" value="task_log" />
-            </el-select>
-            <el-select v-model="fallbackFilter" placeholder="识别状态" clearable style="width: 140px; margin-left: 8px" @change="loadFiles">
-              <el-option label="仅未识别" :value="true" />
-              <el-option label="仅已识别" :value="false" />
-            </el-select>
-            <el-select v-model="summaryFilter" placeholder="原始结果" clearable style="width: 140px; margin-left: 8px" @change="loadFiles">
-              <el-option label="Success" value="success" />
-              <el-option label="Failed" value="failed" />
-              <el-option label="Blocked" value="blocked" />
-            </el-select>
-            <el-button style="margin-left: 8px" @click="loadFiles">
-              <el-icon><Refresh /></el-icon>
-            </el-button>
+            <el-tooltip content="按审核状态过滤" placement="top">
+              <el-select v-model="statusFilter" placeholder="审核状态" clearable style="width: 140px" @change="loadFiles">
+                <el-option label="待审核" value="pending" />
+                <el-option label="已确认" value="confirmed" />
+                <el-option label="已覆盖" value="overridden" />
+              </el-select>
+            </el-tooltip>
+            <el-tooltip content="按文件类型过滤：测试套/用例/任务日志" placement="top">
+              <el-select v-model="typeFilter" placeholder="文件类型" clearable style="width: 140px; margin-left: 8px" @change="loadFiles">
+                <el-option label="测试套" value="testsuite" />
+                <el-option label="测试用例" value="testcase" />
+                <el-option label="任务日志" value="task_log" />
+              </el-select>
+            </el-tooltip>
+            <el-tooltip content="按识别状态过滤" placement="top">
+              <el-select v-model="fallbackFilter" placeholder="识别状态" clearable style="width: 140px; margin-left: 8px" @change="loadFiles">
+                <el-option label="仅未识别" :value="true" />
+                <el-option label="仅已识别" :value="false" />
+              </el-select>
+            </el-tooltip>
+            <el-tooltip content="按上传方原始结果过滤" placement="top">
+              <el-select v-model="summaryFilter" placeholder="原始结果" clearable style="width: 140px; margin-left: 8px" @change="loadFiles">
+                <el-option label="Success" value="success" />
+                <el-option label="Failed" value="failed" />
+                <el-option label="Blocked" value="blocked" />
+              </el-select>
+            </el-tooltip>
+            <el-tooltip content="刷新当前筛选结果" placement="top">
+              <el-button style="margin-left: 8px" @click="loadFiles">
+                <el-icon><Refresh /></el-icon>
+              </el-button>
+            </el-tooltip>
           </div>
-          <el-table :data="files" v-loading="filesLoading" max-height="600" stripe>
-            <el-table-column label="日志文件" min-width="240">
+          <el-table :data="files" v-loading="filesLoading" max-height="600" stripe class="data-table">
+            <el-table-column label="日志文件" min-width="220">
               <template #default="{ row }">
                 <span class="mono file-cell" :title="row.file_path">{{ row.name }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="类型" width="110">
+            <el-table-column label="类型" width="100" align="center">
+              <template #header>
+                <el-tooltip content="测试套 / 测试用例 / 任务日志" placement="top">
+                  <span>类型</span>
+                </el-tooltip>
+              </template>
               <template #default="{ row }">
                 <el-tag size="small" :type="row.file_type === 'testsuite' ? 'success' : row.file_type === 'testcase' ? '' : 'info'">
                   {{ fileTypeLabel(row.file_type) }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="原始结果" width="100">
+            <el-table-column label="原始结果" width="100" align="center">
+              <template #header>
+                <el-tooltip content="上传方 summary_report.yaml 里的 success/failed/blocked" placement="top">
+                  <span>原始结果</span>
+                </el-tooltip>
+              </template>
               <template #default="{ row }">
                 <el-tag v-if="row.summary_report" size="small" :type="summaryStatusTag(row)">
                   {{ summaryResult(row) }}
@@ -484,7 +520,7 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
                 <span v-else class="muted-dash">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="用例/套件" min-width="180">
+            <el-table-column label="用例/套件" min-width="160" show-overflow-tooltip>
               <template #default="{ row }">
                 <template v-if="summaryIdentity(row)">
                   <div class="mono summary-id">{{ summaryIdentity(row).id }}</div>
@@ -492,7 +528,7 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
                 <span v-else class="muted-dash">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="失败原因" min-width="220">
+            <el-table-column label="失败原因" min-width="200" show-overflow-tooltip>
               <template #default="{ row }">
                 <el-tooltip
                   v-if="row.summary_report?.fail_reason_line"
@@ -505,7 +541,7 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
                 <span v-else class="muted-dash">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="最终结论（根因）" min-width="200">
+            <el-table-column label="最终结论（根因）" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
                 <span :class="{ 'unrec-text': !row.final_category && row.failure_count > 0 }">
                   {{ finalCategoryText(row) }}
@@ -513,27 +549,32 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
                 <el-tag v-if="row.is_overridden" size="small" type="primary" style="margin-left: 6px">人工覆盖</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="置信度" width="90">
+            <el-table-column label="置信度" width="90" align="right">
+              <template #header>
+                <el-tooltip content="自动分析置信度（人工覆盖后不显示）" placement="top">
+                  <span>置信度</span>
+                </el-tooltip>
+              </template>
               <template #default="{ row }">
-                <span v-if="row.is_overridden || !row.primary" style="color: #909399">—</span>
-                <span v-else :style="{ color: row.primary.confidence >= 0.7 ? '#67c23a' : '#e6a23c' }">
+                <span v-if="row.is_overridden || !row.primary" class="text-muted">—</span>
+                <span v-else :class="row.primary.confidence >= 0.7 ? 'num-ok' : 'num-warn'">
                   {{ (row.primary.confidence * 100).toFixed(0) }}%
                 </span>
               </template>
             </el-table-column>
-            <el-table-column label="匹配规则" width="160" show-overflow-tooltip>
+            <el-table-column label="匹配规则" min-width="160" show-overflow-tooltip>
               <template #default="{ row }">
-                <span style="font-size: 12px">{{ row.is_overridden ? '—' : (row.primary?.rule_name || '—') }}</span>
+                <span class="text-muted">{{ row.is_overridden ? '—' : (row.primary?.rule_name || '—') }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="审核状态" width="100">
+            <el-table-column label="审核状态" width="100" align="center">
               <template #default="{ row }">
                 <el-tag size="small" :type="reviewBadge(row.review_status).type">
                   {{ reviewBadge(row.review_status).label }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="" width="130" fixed="right">
+            <el-table-column label="操作" width="130" fixed="right" align="center">
               <template #default="{ row }">
                 <el-button link type="primary" size="small" @click="jumpToExplorer(row.id)">日志</el-button>
                 <el-button link type="primary" size="small" @click="openReview(row)">审核</el-button>
@@ -599,77 +640,31 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
                   </el-button>
                 </div>
               </div>
-          <div v-if="false" class="explorer-toolbar">
-            <el-select
-              v-model="explorerFileId"
-              filterable
-              placeholder="选择日志文件"
-              style="width: 420px"
-              :loading="explorerFilesLoading"
-              @change="handleExplorerFileChange"
-            >
-              <el-option
-                v-for="file in explorerFiles"
-                :key="file.id"
-                :label="summaryIdentity(file)?.id || file.name"
-                :value="file.id"
-              >
-                <div class="explorer-option">
-                  <span class="mono">{{ summaryIdentity(file)?.id || file.name }}</span>
-                  <el-tag size="small" :type="file.file_type === 'testsuite' ? 'success' : file.file_type === 'testcase' ? '' : 'info'">
-                    {{ fileTypeLabel(file.file_type) }}
-                  </el-tag>
-                  <span class="explorer-option-name">{{ file.name }}</span>
+              <div class="explorer-log-container" v-loading="explorerLoading">
+                <div v-if="explorerLog.lines.length" class="explorer-lines">
+                  <div
+                    v-for="line in explorerLog.lines"
+                    :key="line.no"
+                    class="explorer-line"
+                    :class="{ error: line.is_error }"
+                  >
+                    <span class="explorer-line-no">{{ line.no }}</span>
+                    <span class="explorer-line-text">{{ line.text }}</span>
+                  </div>
                 </div>
-              </el-option>
-            </el-select>
-            <span class="raw-info explorer-title" :title="selectedExplorerFile?.file_path">
-              {{ explorerFileTitle }}
-            </span>
-            <el-pagination
-              v-if="explorerLog.total_lines > pageSize"
-              v-model:current-page="explorerPage"
-              :page-size="pageSize"
-              :total="explorerLog.total_lines"
-              layout="prev, pager, next"
-              small
-              @current-change="loadExplorerLog"
-            />
-          </div>
-          <div v-if="false" class="raw-toolbar explorer-subbar">
-            <span class="raw-info">
-              共 {{ (explorerLog.total_lines || 0).toLocaleString() }} 行，
-              当前 {{ explorerLog.start_line }}–{{ explorerLog.end_line }}
-            </span>
-            <el-button size="small" @click="loadExplorerLog" :disabled="!explorerFileId">
-              <el-icon><Refresh /></el-icon>
-            </el-button>
-          </div>
-          <div class="explorer-log-container" v-loading="explorerLoading">
-            <div v-if="explorerLog.lines.length" class="explorer-lines">
-              <div
-                v-for="line in explorerLog.lines"
-                :key="line.no"
-                class="explorer-line"
-                :class="{ error: line.is_error }"
-              >
-                <span class="explorer-line-no">{{ line.no }}</span>
-                <span class="explorer-line-text">{{ line.text }}</span>
+                <div v-else class="explorer-empty">暂无日志内容</div>
               </div>
-            </div>
-            <div v-else class="explorer-empty">暂无日志内容</div>
-          </div>
             </section>
           </div>
         </el-tab-pane>
 
         <!-- Failures Tab -->
         <el-tab-pane label="失败事件" name="failures">
-          <el-table :data="failures" v-loading="failuresLoading" max-height="600" stripe>
-            <el-table-column prop="exception_type" label="异常类型" width="180" />
-            <el-table-column prop="script_name" label="脚本" width="200" />
+          <el-table :data="failures" v-loading="failuresLoading" max-height="600" stripe class="data-table">
+            <el-table-column prop="exception_type" label="异常类型" min-width="180" show-overflow-tooltip />
+            <el-table-column prop="script_name" label="脚本" min-width="200" show-overflow-tooltip />
             <el-table-column prop="exception_message" label="异常信息" min-width="300" show-overflow-tooltip />
-            <el-table-column label="详情" width="80" fixed="right">
+            <el-table-column label="详情" width="80" fixed="right" align="center">
               <template #default="{ row }">
                 <el-popover placement="left" :width="600" trigger="click">
                   <template #reference>
@@ -682,7 +677,7 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
           </el-table>
         </el-tab-pane>
       </el-tabs>
-    </el-card>
+    </AppSection>
 
     <!-- Review Drawer -->
     <ReviewDrawer
@@ -694,59 +689,58 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 </template>
 
 <style scoped>
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 8px;
+.task-detail {
+  max-width: 1600px;
 }
 
-.page-header h2 {
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.task-meta {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 8px;
+.error-msg {
+  margin-bottom: var(--space-section);
 }
 
 .meta-item {
-  font-size: 13px;
-  color: #909399;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
 }
 .meta-item.mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-tiny);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mono {
-  font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-mono);
+}
+
+.data-table :deep(.el-table__row) {
+  height: var(--table-row-h);
+}
+.data-table :deep(.el-table__cell) {
+  padding-block: var(--table-cell-py);
 }
 
 .file-cell {
-  font-size: 12.5px;
+  font-size: var(--text-small);
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
 }
 
 .unrec-text {
-  color: #e6a23c;
+  color: var(--color-warning);
 }
 
 .summary-id {
-  font-size: 12px;
-}
-
-.summary-desc {
-  font-size: 11.5px;
-  color: #909399;
-  line-height: 1.3;
+  font-size: var(--text-small);
 }
 
 .summary-fail {
-  font-size: 12px;
-  color: #606266;
+  font-size: var(--text-small);
+  color: var(--text-primary);
   display: inline-block;
   max-width: 100%;
   overflow: hidden;
@@ -756,78 +750,81 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 }
 
 .muted-dash {
-  color: #c0c4cc;
+  color: var(--text-muted);
 }
+.text-muted { color: var(--text-muted); }
+.num-ok    { color: var(--color-success); font-variant-numeric: tabular-nums; }
+.num-warn  { color: var(--color-warning); font-variant-numeric: tabular-nums; }
 
-.error-msg {
-  margin-top: 12px;
-  max-width: 600px;
+/* ── Stat cards ── */
+.stat-row {
+  margin: 0;
 }
-
-.stats-row {
-  margin-top: 16px;
-}
-
 .mini-stat {
-  background: #fff;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
   text-align: center;
+  height: 100%;
 }
-
 .mini-stat .mini-stat-num {
   display: block;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
 }
-
 .mini-stat .mini-stat-label {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  margin-top: var(--space-xs);
 }
+.mini-stat.error .mini-stat-num   { color: var(--color-error); }
+.mini-stat.success .mini-stat-num { color: var(--color-success); }
+.mini-stat.warning .mini-stat-num { color: var(--color-warning); }
 
-.mini-stat.error .mini-stat-num { color: #f56c6c; }
-.mini-stat.success .mini-stat-num { color: #67c23a; }
-.mini-stat.warning .mini-stat-num { color: #e6a23c; }
-
-.mini-stat.warning {
+.mini-stat.clickable {
   cursor: pointer;
-  border-radius: 6px;
   transition: box-shadow 0.15s;
 }
-.mini-stat.warning:hover {
-  box-shadow: 0 0 0 2px #e6a23c33;
+.mini-stat.clickable:hover {
+  box-shadow: 0 0 0 2px rgba(230, 162, 60, 0.2);
 }
-.mini-stat.warning.active {
-  box-shadow: 0 0 0 2px #e6a23c;
+.mini-stat.clickable.active {
+  box-shadow: 0 0 0 2px var(--color-warning);
+}
+
+.results-toolbar {
+  margin-bottom: var(--space-md);
+  display: flex;
+  align-items: center;
 }
 
 .raw-toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: var(--space-md);
 }
 
 .raw-info {
-  font-size: 13px;
-  color: #909399;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
 }
 
 .raw-log-container {
   background: #1e1e1e;
-  border-radius: 6px;
-  padding: 16px;
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
   max-height: 500px;
   overflow: auto;
 }
 
 .raw-log-container pre {
   color: #d4d4d4;
-  font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 13px;
+  font-family: var(--font-mono);
+  font-size: var(--text-body);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-all;
@@ -837,8 +834,8 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 .explorer-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: var(--space-lg);
+  margin-bottom: var(--space-md);
 }
 
 .explorer-title {
@@ -849,13 +846,13 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 }
 
 .explorer-subbar {
-  margin-bottom: 8px;
+  margin-bottom: var(--space-md);
 }
 
 .explorer-option {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-md);
 }
 
 .explorer-option-name {
@@ -863,26 +860,26 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #909399;
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: var(--text-small);
 }
 
 .explorer-log-container {
-  background: #fff;
+  background: var(--bg-panel);
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px 0;
+  padding: var(--space-md) 0;
 }
 
 .explorer-line {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
-  column-gap: 12px;
+  column-gap: var(--space-lg);
   min-height: 22px;
-  padding: 1px 14px;
-  font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12.5px;
+  padding: 1px var(--space-lg);
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
   line-height: 1.55;
   border-bottom: 1px solid #f3f4f6;
 }
@@ -896,26 +893,21 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 }
 
 .explorer-line-no {
-  color: #909399;
+  color: var(--text-secondary);
   text-align: right;
   user-select: none;
 }
 
 .explorer-line-text {
-  color: #303133;
+  color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-all;
 }
 
 .explorer-empty {
-  color: #909399;
-  padding: 24px;
+  color: var(--text-secondary);
+  padding: var(--space-2xl);
   text-align: center;
-}
-
-.explorer-toolbar,
-.explorer-subbar {
-  display: none;
 }
 
 .explorer-layout {
@@ -923,14 +915,14 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
   grid-template-columns: 300px minmax(0, 1fr);
   min-height: 620px;
   height: min(680px, calc(100vh - 260px));
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
 .explorer-tree-panel {
-  background: var(--bg-panel, #fff);
-  border-right: 1px solid #e4e7ed;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -940,19 +932,19 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 .explorer-tree-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  font-size: 12px;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  font-size: var(--text-small);
   font-weight: 600;
-  color: #606266;
-  border-bottom: 1px solid #e4e7ed;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-light);
   flex-shrink: 0;
 }
 
 .explorer-tree-count {
   margin-left: auto;
-  font-size: 11px;
-  color: #909399;
+  font-size: var(--text-tiny);
+  color: var(--text-secondary);
   font-weight: 400;
 }
 
@@ -960,7 +952,7 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px 0;
+  padding: var(--space-md) 0;
 }
 
 .explorer-viewer {
@@ -968,23 +960,23 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #fff;
+  background: var(--bg-panel);
 }
 
 .explorer-viewer-head {
   min-height: 44px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
-  border-bottom: 1px solid #e4e7ed;
+  gap: var(--space-lg);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-light);
 }
 
 .explorer-path {
   display: block;
   margin-top: 2px;
-  color: #909399;
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: var(--text-tiny);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -993,13 +985,13 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
 .explorer-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-md);
   flex-shrink: 0;
 }
 
 .traceback-pre {
-  font-family: 'Cascadia Code', 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
@@ -1007,14 +999,8 @@ const explorerTree = computed(() => buildExplorerTree(explorerFiles.value))
   overflow: auto;
   background: #1e1e1e;
   color: #d4d4d4;
-  padding: 12px;
-  border-radius: 4px;
+  padding: var(--space-lg);
+  border-radius: var(--radius-sm);
   margin: 0;
-}
-
-.results-toolbar {
-  margin-bottom: 12px;
-  display: flex;
-  align-items: center;
 }
 </style>

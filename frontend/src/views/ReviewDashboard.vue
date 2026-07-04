@@ -4,6 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { reviewApi } from '@/api'
 import ReviewDrawer from '@/components/ReviewDrawer.vue'
 import HighValueDialog from '@/components/HighValueDialog.vue'
+import AppPageHeader from '@/components/layout/AppPageHeader.vue'
+import AppSection from '@/components/layout/AppSection.vue'
 
 // ── Tabs ──
 const activeTab = ref('pending')
@@ -19,7 +21,7 @@ const drawerFileId = ref(null)
 // ── High-value dialog ──
 const hvVisible = ref(false)
 const hvFileId = ref(null)
-const hvRecordId = ref(null)    // for editing existing notes
+const hvRecordId = ref(null)
 const hvCurrentNotes = ref('')
 
 // ── Pagination ──
@@ -128,88 +130,90 @@ function fmtDate(d) {
 </script>
 
 <template>
-  <div class="review-dashboard">
-    <div class="page-header">
-      <h2>审核复盘</h2>
-      <span class="page-sub">查看人工覆盖的审核结论，提取反馈信息</span>
-    </div>
+  <div class="page review-dashboard">
+    <AppPageHeader
+      title="审核复盘"
+      subtitle="查看人工覆盖的审核结论，提取反馈信息"
+    />
 
-    <el-tabs v-model="activeTab" @tab-change="onTabChange">
-      <el-tab-pane label="待处理" name="pending" />
-      <el-tab-pane label="已归档" name="archived" />
-      <el-tab-pane label="高价值" name="high-value" />
-    </el-tabs>
+    <AppSection flush>
+      <el-tabs v-model="activeTab" @tab-change="onTabChange">
+        <el-tab-pane label="待处理" name="pending" />
+        <el-tab-pane label="已归档" name="archived" />
+        <el-tab-pane label="高价值" name="high-value" />
+      </el-tabs>
 
-    <div v-loading="loading" class="card-list">
-      <el-empty v-if="!items.length && !loading" description="暂无数据" />
+      <div v-loading="loading" class="card-list">
+        <el-empty v-if="!items.length && !loading" description="暂无数据" />
 
-      <div v-for="item in items" :key="item.id" class="review-card">
-        <div class="card-top">
-          <div class="card-file">
-            <el-icon :size="16"><Document /></el-icon>
-            <span class="mono file-name">{{ item.name }}</span>
-            <el-tag size="small" type="info">{{ typeLabel(item.file_type) }}</el-tag>
-            <el-tag v-if="item.testcase_name" size="small" type="info" effect="plain">{{ item.testcase_name }}</el-tag>
+        <div v-for="item in items" :key="item.id" class="review-card">
+          <div class="card-top">
+            <div class="card-file">
+              <el-icon :size="16"><Document /></el-icon>
+              <span class="mono file-name">{{ item.name }}</span>
+              <el-tag size="small" type="info">{{ typeLabel(item.file_type) }}</el-tag>
+              <el-tag v-if="item.testcase_name" size="small" type="info" effect="plain">{{ item.testcase_name }}</el-tag>
+            </div>
+            <span class="card-time">{{ fmtDate(item.reviewed_at) }}</span>
           </div>
-          <span class="card-time">{{ fmtDate(item.reviewed_at) }}</span>
+
+          <div class="card-body">
+            <div class="card-row">
+              <span class="card-label">任务</span>
+              <span class="card-value mono">{{ item.task_name || item.task_id }}</span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">自动结论</span>
+              <span class="card-value">{{ catLabel(item.primary?.category) }}</span>
+              <span v-if="item.primary?.rule_name" class="card-meta">
+                · 规则 {{ item.primary.rule_name }} · 置信度 {{ (item.primary.confidence * 100).toFixed(0) }}%
+              </span>
+            </div>
+            <div class="card-row">
+              <span class="card-label">人工覆盖</span>
+              <span class="card-value overridden-cat">{{ catLabel(item.override_category) }}</span>
+            </div>
+            <div v-if="item.high_value?.notes" class="card-row hv-notes">
+              <span class="card-label">⭐ 备注</span>
+              <span class="card-value">{{ item.high_value.notes }}</span>
+            </div>
+            <div v-if="item.reviewer_note" class="card-row">
+              <span class="card-label">审核备注</span>
+              <span class="card-value note-text">{{ item.reviewer_note }}</span>
+            </div>
+          </div>
+
+          <div class="card-actions">
+            <el-button size="small" text type="primary" @click="showDetail(item.id)">查看详情</el-button>
+
+            <template v-if="activeTab === 'pending'">
+              <el-button size="small" text type="warning" @click="handleReset(item)">↩ 驳回</el-button>
+              <el-button size="small" text @click="handleArchive(item)">📦 归档</el-button>
+              <el-button size="small" text type="danger" @click="openHighValue(item)">⭐ 归档为高价值</el-button>
+            </template>
+
+            <template v-if="activeTab === 'archived'">
+              <el-button size="small" text type="primary" @click="handleUnarchive(item)">↩ 取消归档</el-button>
+            </template>
+
+            <template v-if="activeTab === 'high-value'">
+              <el-button size="small" text type="primary" @click="editHighValueNotes(item)">✏ 修改备注</el-button>
+            </template>
+          </div>
         </div>
 
-        <div class="card-body">
-          <div class="card-row">
-            <span class="card-label">任务</span>
-            <span class="card-value mono">{{ item.task_name || item.task_id }}</span>
-          </div>
-          <div class="card-row">
-            <span class="card-label">自动结论</span>
-            <span class="card-value">{{ catLabel(item.primary?.category) }}</span>
-            <span v-if="item.primary?.rule_name" class="card-meta">
-              · 规则 {{ item.primary.rule_name }} · 置信度 {{ (item.primary.confidence * 100).toFixed(0) }}%
-            </span>
-          </div>
-          <div class="card-row">
-            <span class="card-label">人工覆盖</span>
-            <span class="card-value overridden-cat">{{ catLabel(item.override_category) }}</span>
-          </div>
-          <div v-if="item.high_value?.notes" class="card-row hv-notes">
-            <span class="card-label">⭐ 备注</span>
-            <span class="card-value">{{ item.high_value.notes }}</span>
-          </div>
-          <div v-if="item.reviewer_note" class="card-row">
-            <span class="card-label">审核备注</span>
-            <span class="card-value note-text">{{ item.reviewer_note }}</span>
-          </div>
-        </div>
-
-        <div class="card-actions">
-          <el-button size="small" text type="primary" @click="showDetail(item.id)">查看详情</el-button>
-
-          <template v-if="activeTab === 'pending'">
-            <el-button size="small" text type="warning" @click="handleReset(item)">↩ 驳回</el-button>
-            <el-button size="small" text @click="handleArchive(item)">📦 归档</el-button>
-            <el-button size="small" text type="danger" @click="openHighValue(item)">⭐ 归档为高价值</el-button>
-          </template>
-
-          <template v-if="activeTab === 'archived'">
-            <el-button size="small" text type="primary" @click="handleUnarchive(item)">↩ 取消归档</el-button>
-          </template>
-
-          <template v-if="activeTab === 'high-value'">
-            <el-button size="small" text type="primary" @click="editHighValueNotes(item)">✏ 修改备注</el-button>
-          </template>
-        </div>
+        <el-pagination
+          v-if="items.length"
+          v-model:current-page="page"
+          :page-size="pageSize"
+          :total="items.length >= pageSize ? (page * pageSize + 1) : items.length"
+          layout="prev, pager, next"
+          small
+          class="card-pager"
+          @current-change="load"
+        />
       </div>
-
-      <el-pagination
-        v-if="items.length"
-        v-model:current-page="page"
-        :page-size="pageSize"
-        :total="items.length >= pageSize ? (page * pageSize + 1) : items.length"
-        layout="prev, pager, next"
-        small
-        class="card-pager"
-        @current-change="load"
-      />
-    </div>
+    </AppSection>
 
     <!-- Review drawer (reused) -->
     <ReviewDrawer
@@ -232,112 +236,98 @@ function fmtDate(d) {
 
 <style scoped>
 .review-dashboard {
-  padding: 24px 32px;
-  max-width: 960px;
-}
-
-.page-header {
-  margin-bottom: 8px;
-}
-.page-header h2 {
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-}
-.page-sub {
-  font-size: 13px;
-  color: #909399;
+  max-width: 1080px;
 }
 
 .card-list {
-  margin-top: 12px;
+  margin-top: var(--space-md);
 }
 
 .review-card {
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  padding: 14px 18px;
-  margin-bottom: 10px;
-  background: #fff;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-md);
+  background: var(--bg-panel);
 }
 
 .card-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: var(--space-md);
 }
 
 .card-file {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-sm);
 }
 
 .file-name {
-  font-size: 14px;
+  font-size: var(--text-body);
   font-weight: 500;
 }
 
 .mono {
-  font-family: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-mono);
 }
 
 .card-time {
-  font-size: 12px;
-  color: #c0c4cc;
+  font-size: var(--text-small);
+  color: var(--text-muted);
 }
 
 .card-body {
-  margin-bottom: 10px;
+  margin-bottom: var(--space-md);
 }
 
 .card-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--space-md);
+  font-size: var(--text-body);
   line-height: 1.8;
 }
 
 .card-label {
-  color: #909399;
+  color: var(--text-secondary);
   flex: none;
-  width: 60px;
+  width: 72px;
 }
 
 .card-value {
-  color: #303133;
+  color: var(--text-primary);
 }
 
 .card-meta {
-  font-size: 12px;
-  color: #c0c4cc;
+  font-size: var(--text-small);
+  color: var(--text-muted);
 }
 
 .overridden-cat {
-  color: #409eff;
+  color: var(--color-primary);
   font-weight: 500;
 }
 
 .note-text {
-  color: #606266;
+  color: var(--text-secondary);
   font-style: italic;
 }
 
 .hv-notes .card-value {
-  color: #e6a23c;
+  color: var(--color-warning);
 }
 
 .card-actions {
   display: flex;
-  gap: 4px;
-  padding-top: 8px;
-  border-top: 1px solid #f0f0f0;
+  gap: var(--space-xs);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border-light);
 }
 
 .card-pager {
-  margin-top: 12px;
+  margin-top: var(--space-lg);
   justify-content: center;
 }
 </style>
