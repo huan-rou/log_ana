@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 
 from app.config import settings
 from app.models.task import (
@@ -17,6 +17,7 @@ from app.models.task import (
     Category,
     LogEntry,
 )
+from app.models.rule import Rule as RuleMeta, RuleStatus
 from app.services.rule_registry import rule_registry
 from rules.base import RuleContext, BaseRule, RuleResult
 
@@ -42,9 +43,19 @@ async def classify_failures(
     task_entries = await _load_task_entries(task.id, db)
 
     # Load enabled rules from DB (sorted by priority)
+    # builtin 规则：仅 AnalysisRule.enabled=True 即参与
+    # user 规则：还需 Rule.status='published' 才参与
     result = await db.execute(
         select(AnalysisRule)
+        .outerjoin(RuleMeta, RuleMeta.analysis_rule_id == AnalysisRule.id)
         .where(AnalysisRule.enabled == True)
+        .where(
+            or_(
+                RuleMeta.id.is_(None),                                  # builtin
+                and_(RuleMeta.status == RuleStatus.published.value,     # user 已发布
+                     RuleMeta.analysis_rule_id.is_not(None))
+            )
+        )
         .order_by(AnalysisRule.priority)
     )
     db_rules = list(result.scalars())

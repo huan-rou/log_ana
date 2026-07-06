@@ -49,6 +49,17 @@ const routes = [
     component: () => import('@/views/MappingManager.vue'),
     meta: { title: '映射管理', breadcrumb: '映射' },
   },
+  {
+    path: '/rules/editor',
+    name: 'RuleEditor',
+    component: () => import('@/views/RuleEditor.vue'),
+    meta: {
+      title: '规则编辑',
+      breadcrumb: [{ label: '规则' }, { label: '规则编辑' }],
+      icon: 'SetUp',
+      requiresRole: 'analyst', // analyst / admin
+    },
+  },
 ]
 
 const router = createRouter({

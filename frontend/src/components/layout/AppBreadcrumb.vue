@@ -8,10 +8,19 @@ const router = useRouter()
 const trail = computed(() => {
   const matched = route.matched
     .filter((m) => m.meta && (m.meta.title || m.meta.breadcrumb))
-  return matched.map((m) => ({
-    title: m.meta.breadcrumb || m.meta.title,
-    path: m.path || m.redirect || '',
-  })).filter((b) => b.title)
+  return matched.map((m) => {
+    // breadcrumb 可能是字符串（直接展示）或数组（取最后一项的 label 作为当前标题）
+    const bc = m.meta.breadcrumb
+    let title
+    if (Array.isArray(bc)) {
+      title = bc.length ? bc[bc.length - 1]?.label : undefined
+    } else if (bc) {
+      title = bc
+    } else {
+      title = m.meta.title
+    }
+    return { title, path: m.path || m.redirect || '' }
+  }).filter((b) => b.title)
 })
 
 function go(item) {

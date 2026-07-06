@@ -88,6 +88,8 @@ def require_role(*roles: UserRole):
 require_admin = require_role(UserRole.admin)
 require_write_review = require_role(UserRole.analyst, UserRole.reviewer, UserRole.admin)
 require_start_task = require_role(UserRole.reviewer, UserRole.admin)
+# 规则编辑器：analyst 与 admin 可创建/编辑自己规则；reviewer/visitor 仅可查看
+require_analyst_or_admin = require_role(UserRole.analyst, UserRole.admin)
 
 # ── 可选的当前用户（游客也可访问，但标记未登录） ──
 async def get_optional_user(

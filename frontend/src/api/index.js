@@ -89,6 +89,15 @@ export const reviewApi = {
 export const ruleApi = {
   list: () => api.get('/rules/'),
   get: (ruleId) => api.get(`/rules/${ruleId}`),
+  source: (ruleId) => api.get(`/rules/${ruleId}/source`, { responseType: 'text' }),
+  audit: (ruleId) => api.get(`/rules/${ruleId}/audit`),
+  create: (data) => api.post('/rules/', data),
+  update: (ruleId, data) => api.put(`/rules/${ruleId}`, data),
+  updateMeta: (ruleId, data) => api.patch(`/rules/${ruleId}/meta`, data),
+  publish: (ruleId) => api.post(`/rules/${ruleId}/publish`),
+  unpublish: (ruleId) => api.post(`/rules/${ruleId}/unpublish`),
+  toggleEnabled: (ruleId, enabled) => api.patch(`/rules/${ruleId}/enabled`, { enabled }),
+  delete: (ruleId) => api.delete(`/rules/${ruleId}`),
   reload: () => api.post('/rules/reload'),
 }
 

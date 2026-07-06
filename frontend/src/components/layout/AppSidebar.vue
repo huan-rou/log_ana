@@ -38,6 +38,7 @@ const navItems = [
   { path: '/',         label: '看板', icon: 'DataAnalysis' },
   { path: '/tasks',    label: '任务', icon: 'List' },
   { path: '/review',   label: '审核', icon: 'Checked' },
+  { path: '/rules/editor', label: '规则编辑', icon: 'SetUp', minRole: 'analyst' },
 ]
 const adminNavItems = [
   { path: '/users',   label: '用户', icon: 'User' },
@@ -49,12 +50,20 @@ const activePath = computed(() => {
   if (p.startsWith('/review')) return '/review'
   if (p.startsWith('/tasks'))  return '/tasks'
   if (p.startsWith('/browse')) return '/browse'
+  if (p.startsWith('/rules'))  return '/rules/editor'
   if (p.startsWith('/users'))  return '/users'
   if (p.startsWith('/mapping')) return '/mapping'
   return p === '/' ? '/' : p
 })
 
 const isAdmin = computed(() => currentUser.value?.role === 'admin')
+
+const ROLE_RANK = { visitor: 0, analyst: 1, reviewer: 2, admin: 3 }
+function roleAtLeast(minRole) {
+  if (!minRole) return true
+  const cur = ROLE_RANK[currentUser.value?.role] ?? -1
+  return cur >= (ROLE_RANK[minRole] ?? 99)
+}
 const roleLabel = computed(() => {
   const map = { visitor: '游客', analyst: '分析员', reviewer: '审核员', admin: '管理员' }
   return map[currentUser.value?.role] || currentUser.value?.role || ''
@@ -90,6 +99,7 @@ function toggle() {
       <template v-if="!group.admin || isAdmin">
         <router-link
           v-for="item in group.items"
+          v-show="!item.minRole || roleAtLeast(item.minRole)"
           :key="item.path"
           :to="item.path"
           class="nav-item"

@@ -10,10 +10,13 @@ from app.config import settings
 from app.database import init_db, seed_default_categories, seed_default_users
 from app.models.user import User  # noqa: F401 — ensure table is created
 from app.models import mapping  # noqa: F401 — ensure mapping tables are created
+from app.models import rule  # noqa: F401 — ensure rule editor tables are created
 from app.api import tasks, logs, analysis, feedback, rules as rules_api, browse, audit, review
 from app.api import auth, mapping
 from app.services.storage.provider_manager import init_providers, shutdown_providers
 from app.core.audit_logger import init_audit_logger
+from app.services.rule_registry import rule_registry
+from app.database import async_session
 
 logger = logging.getLogger("app.main")
 
@@ -29,6 +32,17 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.exception("[startup] init_db failed: %s", exc)
         raise
+
+    # 启动时同步一次规则：保证 builtin 规则已建 AnalysisRule，user 规则已 discover
+    try:
+        await rule_registry.discover()
+        async with async_session() as s:
+            await rule_registry.sync_to_db(s)
+        logger.warning("[startup] rules discovered & synced: %d", len(rule_registry.get_all()))
+    except Exception as exc:
+        logger.exception("[startup] rule discover/sync failed: %s", exc)
+        # 不阻塞启动：若 sync 失败可在首个任务时再重试
+
     init_providers()
     init_audit_logger(str(settings.audit_dir), settings.audit_enabled)
     yield
