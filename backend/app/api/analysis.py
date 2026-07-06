@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy import select, Integer, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
@@ -601,3 +601,195 @@ async def get_report(
         "human_overridden": human_overridden,
         "remaining_unreviewed": remaining_unreviewed,
     }
+
+
+# ════════════════════════════════════════════════════════════════
+# v5: 任务树视图 API（按 round + tree_node_id）
+# ════════════════════════════════════════════════════════════════
+
+from app.models.mapping import TestVersion
+from app.models.task_tree import TestTaskNode, TestTaskTree
+from app.services.task_tree_aggregate import (
+    aggregate_by_name_key as _aggregate_by_name_key,
+    aggregate_testcases_by_name_key as _aggregate_testcases_by_name_key,
+    list_testcases_in_round as _list_testcases_in_round,
+    resolve_node_subtree_leaf_ids as _resolve_node_subtree_leaf_ids,
+)
+from app.services.summary_report import build_suite_response as _build_suite_response
+
+
+# ── 辅助 ──
+
+
+async def _get_task_or_404(db: AsyncSession, task_id: str) -> Task:
+    task = (await db.execute(
+        select(Task).where(Task.id == task_id)
+    )).scalar_one_or_none()
+    if not task:
+        raise HTTPException(404, "Task not found")
+    return task
+
+
+async def _get_version_for_task(db: AsyncSession, task: Task) -> Optional[TestVersion]:
+    """根据 task 找 TestVersion（按 package_version）。"""
+    if not task.package_version:
+        return None
+    return (await db.execute(
+        select(TestVersion).where(TestVersion.version_name == task.package_version)
+    )).scalar_one_or_none()
+
+
+async def _build_tree_node_dict(node: TestTaskNode) -> dict:
+    return {
+        "id": node.id,
+        "tree_id": node.tree_id,
+        "parent_id": node.parent_id,
+        "name": node.name,
+        "name_key": node.name_key,
+        "node_id": node.node_id,
+        "depth": node.depth,
+        "path": node.path,
+        "is_leaf": node.is_leaf,
+        "sort_order": node.sort_order,
+        "extra": node.extra,
+    }
+
+
+async def _build_tree_response(tree: TestTaskTree) -> dict:
+    nodes = sorted(tree.nodes, key=lambda n: (n.depth, n.sort_order))
+    return {
+        "id": tree.id,
+        "version_id": tree.version_id,
+        "round_number": tree.round_number,
+        "root_name": tree.root_name,
+        "root_id": tree.root_id,
+        "note": tree.note,
+        "total_nodes": len(nodes),
+        "leaf_count": sum(1 for n in nodes if n.is_leaf),
+        "nodes": [await _build_tree_node_dict(n) for n in nodes],
+        "created_at": tree.created_at,
+        "parsed_at": tree.parsed_at,
+    }
+
+
+# ── 端点 ──
+
+
+@router.get("/{task_id}/trees")
+async def list_task_trees(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """列出该 Task 所属 TestVersion 下所有轮次。"""
+    task = await _get_task_or_404(db, task_id)
+    version = await _get_version_for_task(db, task)
+    if not version:
+        return []
+    rows = (await db.execute(
+        select(TestTaskTree)
+        .where(TestTaskTree.version_id == version.id)
+        .order_by(TestTaskTree.round_number)
+    )).scalars().all()
+    out = []
+    for t in rows:
+        out.append({
+            "id": t.id,
+            "version_id": t.version_id,
+            "round_number": t.round_number,
+            "root_name": t.root_name,
+            "root_id": t.root_id,
+            "note": t.note,
+            "total_nodes": len(t.nodes) if t.nodes else 0,
+            "leaf_count": sum(1 for n in (t.nodes or []) if n.is_leaf),
+            "created_at": t.created_at,
+            "parsed_at": t.parsed_at,
+        })
+    return out
+
+
+@router.get("/{task_id}/tree")
+async def get_task_tree(
+    task_id: str,
+    round: Optional[int] = Query(None, description="轮次号（不传 = 当前 Task 所在 round）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """拉取指定 round 的 JSON 树。
+
+    不传 round：返回当前 Task 所在 round（通过 tree_node_id 找）。
+    传 round=0：返回 round=1（兜底）。
+    """
+    task = await _get_task_or_404(db, task_id)
+
+    if round is None:
+        # 用当前 Task 所在 round
+        if task.tree_node_id:
+            node = (await db.execute(
+                select(TestTaskNode, TestTaskTree)
+                .join(TestTaskTree, TestTaskNode.tree_id == TestTaskTree.id)
+                .where(TestTaskNode.id == task.tree_node_id)
+            )).first()
+            if node:
+                tree = node[1]
+                return await _build_tree_response(tree)
+        return {"error": "task has no tree_node_id, please specify round"}
+
+    # 显式传 round：找该 version 下该 round 的树
+    version = await _get_version_for_task(db, task)
+    if not version:
+        raise HTTPException(404, "version not found for task")
+    tree = (await db.execute(
+        select(TestTaskTree).where(
+            TestTaskTree.version_id == version.id,
+            TestTaskTree.round_number == round,
+        )
+    )).scalar_one_or_none()
+    if not tree:
+        raise HTTPException(404, f"round {round} not found")
+    return await _build_tree_response(tree)
+
+
+@router.get("/{task_id}/aggregate")
+async def aggregate_node(
+    task_id: str,
+    tree_node_id: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+):
+    """整体视图节点元信息：跨 round 按 name_key 聚合。
+
+    输入：tree_node_id（来自 round=1 树）
+    输出：execution_count / latest_round / missing_rounds / all_rounds
+    """
+    task = await _get_task_or_404(db, task_id)
+    version = await _get_version_for_task(db, task)
+    if not version:
+        raise HTTPException(404, "version not found for task")
+    result = await _aggregate_by_name_key(db, version.id, tree_node_id)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    return result
+
+
+@router.get("/{task_id}/aggregate/testcases")
+async def aggregate_testcases(
+    task_id: str,
+    tree_node_id: str = Query(..., min_length=1),
+    db: AsyncSession = Depends(get_db),
+):
+    """整体视图右表：跨 round 按 testcase_name 聚合的 TestCase 行。"""
+    task = await _get_task_or_404(db, task_id)
+    version = await _get_version_for_task(db, task)
+    if not version:
+        raise HTTPException(404, "version not found for task")
+    return await _aggregate_testcases_by_name_key(db, version.id, tree_node_id)
+
+
+@router.get("/{task_id}/testcases")
+async def list_testcases_for_task(
+    task_id: str,
+    tree_node_id: Optional[str] = Query(None, description="当前选中的 tree_node_id（可选）"),
+    db: AsyncSession = Depends(get_db),
+):
+    """单轮次视图右表：当前 Task 下 file_type=testcase 的 LogFile，按 testcase_name 分组。"""
+    task = await _get_task_or_404(db, task_id)
+    return await _list_testcases_in_round(db, task_id, tree_node_id)
+

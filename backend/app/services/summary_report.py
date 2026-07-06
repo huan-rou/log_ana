@@ -194,3 +194,71 @@ def summary_for_file(log_file, lookup: Optional[dict], source_path: str) -> Opti
         "fail_reason_short": short_fail_reason(fail_detail),
         "source_path": source_path,
     }
+
+
+def find_suite_logfile(suite_info: Optional[dict], suite_logfiles: list) -> Optional[object]:
+    """5 步启发式匹配 suite.id/desc/name 与 testsuite LogFile.name。
+
+    Returns:
+        匹配到的 LogFile，或 None（不抛错）
+
+    匹配策略（按优先级）：
+      1. suite.id 的 stem 等于 LogFile.name 的 stem（精确）
+      2. suite.id 包含 LogFile.name 的 stem（子串）
+      3. LogFile.name 的 stem 包含 suite.id（反向子串）
+      4. suite.desc 同上三种
+      5. 都不匹配 → None
+    """
+    if not suite_info or not suite_logfiles:
+        return None
+
+    # 收集候选 key
+    candidates: list[str] = []
+    for key in ("id", "desc", "name"):
+        v = suite_info.get(key)
+        if v:
+            v_lower = str(v).lower()
+            candidates.append(v_lower)
+            for sep in ("_", "-"):
+                if sep in v_lower:
+                    candidates.append(v_lower.rsplit(sep, 1)[0])
+
+    for lf in suite_logfiles:
+        lf_stem = lf.name.lower().rsplit(".", 1)[0]
+        for cand in candidates:
+            if not cand:
+                continue
+            if cand == lf_stem:
+                return lf
+            if cand in lf_stem or lf_stem in cand:
+                return lf
+    return None
+
+
+def build_suite_response(
+    suite_info: Optional[dict], suite_logfiles: list
+) -> Optional[dict]:
+    """把 suite_info + 匹配到的 suite_logfile 打包成 API 响应。
+
+    Returns:
+        { id, name, desc, result, start_time, end_time, fail_detail_short,
+          logfile_id, logfile_path, logfile_name } 或 None（无 suite_info）
+    """
+    if not suite_info:
+        return None
+
+    fail_detail = str(suite_info.get("fail_detail") or "")
+    lf = find_suite_logfile(suite_info, suite_logfiles)
+
+    return {
+        "id": suite_info.get("id"),
+        "name": suite_info.get("name") or suite_info.get("desc"),
+        "desc": suite_info.get("desc"),
+        "result": suite_info.get("result"),
+        "start_time": suite_info.get("start_time"),
+        "end_time": suite_info.get("end_time"),
+        "fail_detail_short": short_fail_reason(fail_detail),
+        "logfile_id": lf.id if lf else None,
+        "logfile_path": lf.file_path if lf else None,
+        "logfile_name": lf.name if lf else None,
+    }
