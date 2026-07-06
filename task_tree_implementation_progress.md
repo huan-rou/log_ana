@@ -14,6 +14,7 @@
 1ecf539  feat(services): task_tree JSON parser + unit tests
 7a7b5ac  feat(services): S3 probe + 14 unit tests
 859cb6f  feat(api): v5 mapping endpoints for JSON tree (6 endpoints + 14 tests)
+9a99800  feat(api): v5 analysis endpoints + suite LogFile matching (11 tests)
 ```
 
 ### 已落地的代码
@@ -33,7 +34,11 @@
 | `backend/app/api/mapping.py` | ✅ 改动 | 6 个 v5 端点（preview/append/list/get/delete/create_tasks/auto-fetch/note）|
 | `backend/app/models/task.py` | ✅ 改动 | **bug 修复**：Task.tree_node_id 之前误加在 LogFile 类，已移到 Task 类 |
 | `backend/app/services/task_tree.py` | ✅ 改动 | `check_cross_round_id_conflict` 改为 async（DB 查询需要 await）|
-| `backend/tests/test_mapping_api.py` | ✅ 新建 | 14 个集成测试 |
+| `backend/app/services/task_tree_aggregate.py` | ✅ 新建 | 聚合算法：`aggregate_by_name_key` / `aggregate_testcases_by_name_key` / `list_testcases_in_round` |
+| `backend/app/services/summary_report.py` | ✅ 改动 | 新增 `find_suite_logfile` 5 步匹配 + `build_suite_response` |
+| `backend/app/api/analysis.py` | ✅ 改动 | 5 个 v5 端点（trees/tree/aggregate/aggregate/testcases/testcases）|
+| `backend/tests/test_mapping_api.py` | ✅ 新建 | 14 个 mapping 集成测试 |
+| `backend/tests/test_analysis_api.py` | ✅ 新建 | 11 个 analysis 集成测试 |
 | `backend/pyproject.toml` | ✅ 改动 | `[tool.pytest.ini_options] asyncio_mode = "auto"` |
 
 ### 关键 API 已就绪
@@ -54,7 +59,7 @@ check_cross_round_id_conflict(db, version_id, new_leaf_ids) -> list[dict]
 ### 单测结果
 ```bash
 $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
-======================= 57 passed, 14 warnings in 6.19s ======================
+======================= 68 passed, 43 warnings in 9.33s ======================
 ```
 
 ## 待办（按依赖顺序）
@@ -230,8 +235,8 @@ npm run dev
 - ✅ 解析器（29 个单测全过）
 - ✅ S3 探测（14 个单测全过；`probe_leaf_in_s3` / `probe_leaves_in_s3_batch`）
 - ✅ Mapping API（8 个端点 + 14 个集成测试全过）
-- ⏳ Analysis API（5 个端点 + suite 匹配）—— **下一步**
-- ⏳ 日志设施
+- ✅ Analysis API（5 个端点 + suite 匹配 + 11 个集成测试全过）
+- ⏳ 日志设施（`logging_setup.py` + `app_debug_logging`）—— **下一步**
 - ⏳ 前端 API 客户端
 - ⏳ MappingManager.vue
 - ⏳ TaskDetail.vue
