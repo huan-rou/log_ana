@@ -207,7 +207,7 @@ def parse_task_tree(raw_json: str) -> dict:
     }
 
 
-def check_cross_round_id_conflict(
+async def check_cross_round_id_conflict(
     db,
     version_id: str,
     new_leaf_ids: list[str],
@@ -232,7 +232,7 @@ def check_cross_round_id_conflict(
             TestTaskNode.node_id.in_(new_leaf_ids),
         )
     )
-    rows = db.execute(stmt).all()
+    rows = (await db.execute(stmt)).all()
     conflicts: list[dict] = []
     for node_id, round_number, tn_id in rows:
         conflicts.append({
