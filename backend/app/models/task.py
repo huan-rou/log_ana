@@ -148,6 +148,12 @@ class LogFile(Base):
     reviewer_note: Mapped[Optional[str]] = mapped_column(Text, default=None)
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=None)
 
+    # ── 任务树关联（v5）──
+    # 指向 TestTaskNode.id（叶子节点）；NULL = 未关联或老任务
+    tree_node_id: Mapped[Optional[str]] = mapped_column(
+        String(12), ForeignKey("test_task_nodes.id"), default=None, index=True
+    )
+
     # ── 人工覆盖（review_status=overridden 时有效）──
     override_category_id: Mapped[Optional[str]] = mapped_column(
         String(12), ForeignKey("categories.id"), default=None
