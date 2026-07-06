@@ -13,6 +13,7 @@
 8aaf7ec  feat(models): add TestTaskTree / TestTaskNode + tasks.tree_node_id
 1ecf539  feat(services): task_tree JSON parser + unit tests
 7a7b5ac  feat(services): S3 probe + 14 unit tests
+859cb6f  feat(api): v5 mapping endpoints for JSON tree (6 endpoints + 14 tests)
 ```
 
 ### 已落地的代码
@@ -29,6 +30,10 @@
 | `backend/tests/__init__.py` | ✅ 新建 | 测试包初始化 |
 | `backend/conftest.py` | ✅ 新建 | pytest 全局配置（用内存 SQLite） |
 | `backend/app/services/task_tree_s3.py` | ✅ 新建 | S3 探测：`probe_leaf_in_s3` / `probe_leaves_in_s3_batch` |
+| `backend/app/api/mapping.py` | ✅ 改动 | 6 个 v5 端点（preview/append/list/get/delete/create_tasks/auto-fetch/note）|
+| `backend/app/models/task.py` | ✅ 改动 | **bug 修复**：Task.tree_node_id 之前误加在 LogFile 类，已移到 Task 类 |
+| `backend/app/services/task_tree.py` | ✅ 改动 | `check_cross_round_id_conflict` 改为 async（DB 查询需要 await）|
+| `backend/tests/test_mapping_api.py` | ✅ 新建 | 14 个集成测试 |
 | `backend/pyproject.toml` | ✅ 改动 | `[tool.pytest.ini_options] asyncio_mode = "auto"` |
 
 ### 关键 API 已就绪
@@ -49,7 +54,7 @@ check_cross_round_id_conflict(db, version_id, new_leaf_ids) -> list[dict]
 ### 单测结果
 ```bash
 $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
-============================== 43 passed in 0.73s ==============================
+======================= 57 passed, 14 warnings in 6.19s ======================
 ```
 
 ## 待办（按依赖顺序）
@@ -224,8 +229,8 @@ npm run dev
 - ✅ 数据模型（建表 + ALTER 兜底）
 - ✅ 解析器（29 个单测全过）
 - ✅ S3 探测（14 个单测全过；`probe_leaf_in_s3` / `probe_leaves_in_s3_batch`）
-- ⏳ Mapping API（6 个端点）—— **下一步**
-- ⏳ Analysis API（5 个端点 + suite 匹配）
+- ✅ Mapping API（8 个端点 + 14 个集成测试全过）
+- ⏳ Analysis API（5 个端点 + suite 匹配）—— **下一步**
 - ⏳ 日志设施
 - ⏳ 前端 API 客户端
 - ⏳ MappingManager.vue
