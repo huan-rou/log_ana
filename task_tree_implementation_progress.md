@@ -12,6 +12,7 @@
 5c14ff3  docs: add task tree grouping implementation plan (v5)
 8aaf7ec  feat(models): add TestTaskTree / TestTaskNode + tasks.tree_node_id
 1ecf539  feat(services): task_tree JSON parser + unit tests
+7a7b5ac  feat(services): S3 probe + 14 unit tests
 ```
 
 ### 已落地的代码
@@ -24,8 +25,11 @@
 | `backend/app/database.py` | ✅ 改动 | `_apply_manual_migrations()` SQLite ALTER 兜底 |
 | `backend/app/services/task_tree.py` | ✅ 新建 | `parse_task_tree` / `compute_name_key` / `check_cross_round_id_conflict` |
 | `backend/tests/test_task_tree.py` | ✅ 新建 | 29 个单测，**全过** |
+| `backend/tests/test_task_tree_s3.py` | ✅ 新建 | 14 个 S3 探测单测，**全过** |
 | `backend/tests/__init__.py` | ✅ 新建 | 测试包初始化 |
 | `backend/conftest.py` | ✅ 新建 | pytest 全局配置（用内存 SQLite） |
+| `backend/app/services/task_tree_s3.py` | ✅ 新建 | S3 探测：`probe_leaf_in_s3` / `probe_leaves_in_s3_batch` |
+| `backend/pyproject.toml` | ✅ 改动 | `[tool.pytest.ini_options] asyncio_mode = "auto"` |
 
 ### 关键 API 已就绪
 
@@ -44,8 +48,8 @@ check_cross_round_id_conflict(db, version_id, new_leaf_ids) -> list[dict]
 
 ### 单测结果
 ```bash
-$ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/test_task_tree.py
-============================== 29 passed in 0.54s ==============================
+$ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
+============================== 43 passed in 0.73s ==============================
 ```
 
 ## 待办（按依赖顺序）
@@ -219,8 +223,8 @@ npm run dev
 
 - ✅ 数据模型（建表 + ALTER 兜底）
 - ✅ 解析器（29 个单测全过）
-- ⏳ S3 探测（**第 4 步，下个会话从这里开始**）
-- ⏳ Mapping API（6 个端点）
+- ✅ S3 探测（14 个单测全过；`probe_leaf_in_s3` / `probe_leaves_in_s3_batch`）
+- ⏳ Mapping API（6 个端点）—— **下一步**
 - ⏳ Analysis API（5 个端点 + suite 匹配）
 - ⏳ 日志设施
 - ⏳ 前端 API 客户端
