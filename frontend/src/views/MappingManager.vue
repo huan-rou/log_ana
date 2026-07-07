@@ -8,6 +8,7 @@ import {
 import api, { mappingApi } from '@/api'
 import AppPageHeader from '@/components/layout/AppPageHeader.vue'
 import AppSection from '@/components/layout/AppSection.vue'
+import TaskTreeNode from '@/components/TaskTreeNode.vue'
 
 // ════════════════════════════════════════════════════════════════
 // 共享：版本 + 原有测试目的逻辑（保留 legacy）
@@ -435,37 +436,8 @@ function s3MissingCount(probe) {
   return Object.values(probe).filter((v) => v === false).length
 }
 
-// ── 内联 TaskTreeNode：渲染任务树（preview / view）──
-const TaskTreeNode = {
-  name: 'TaskTreeNode',
-  props: {
-    node: { type: Object, required: true },
-    depth: { type: Number, default: 0 },
-    showS3: { type: Boolean, default: false },
-  },
-  template: `
-    <div class="tnode">
-      <div class="tnode-line" :style="{ paddingLeft: depth * 18 + 8 + 'px' }">
-        <span class="tnode-name" :class="{ leaf: node.is_leaf }">{{ node.name || '(未命名)' }}</span>
-        <span class="tnode-id num">{{ node.node_id }}</span>
-        <span v-if="node.is_leaf && showS3 && node.s3_matched !== null && node.s3_matched !== undefined" class="tnode-s3">
-          <el-tag :type="node.s3_matched ? 'success' : 'warning'" size="small" effect="plain">
-            {{ node.s3_matched ? 'S3 ✓' : 'S3 ✗' }}
-          </el-tag>
-        </span>
-      </div>
-      <div v-if="node.children && node.children.length" class="tnode-children">
-        <TaskTreeNode
-          v-for="(child, i) in node.children"
-          :key="child.id || child.node_id || i"
-          :node="child"
-          :depth="depth + 1"
-          :show-s3="showS3"
-        />
-      </div>
-    </div>
-  `,
-}
+// ── 任务树渲染由独立组件 @/components/TaskTreeNode.vue 处理 ──
+// 这里不再保留 inline 定义
 </script>
 
 <template>
@@ -825,7 +797,7 @@ const TaskTreeNode = {
         <el-collapse v-model="previewCollapse">
           <el-collapse-item title="树形预览" name="tree">
             <div class="tree-preview">
-              <TreeNode :node="previewResult.tree" :depth="0" />
+              <TaskTreeNode :node="previewResult.tree" :depth="0" />
             </div>
           </el-collapse-item>
           <el-collapse-item
@@ -915,7 +887,7 @@ const TaskTreeNode = {
             style="margin-bottom: 12px"
           />
           <div class="view-tree-panel">
-            <TreeNode :node="viewTree" :depth="0" :show-s3="viewIncludeS3" />
+            <TaskTreeNode :node="viewTree.tree" :depth="0" :show-s3="viewIncludeS3" />
           </div>
         </template>
       </div>
@@ -1158,38 +1130,5 @@ const TaskTreeNode = {
   gap: 4px;
 }
 
-/* TaskTreeNode 内联组件样式 */
-.tnode { font-size: var(--text-small); }
-.tnode-line {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  padding-block: 2px;
-  border-radius: var(--radius-sm);
-}
-.tnode-line:hover { background: var(--bg-hover); }
-.tnode-name {
-  color: var(--text-primary);
-  font-weight: 400;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-.tnode-name.leaf {
-  color: var(--color-primary);
-  font-weight: 500;
-}
-.tnode-id {
-  color: var(--text-muted);
-  font-size: var(--text-tiny);
-  flex-shrink: 0;
-}
-.tnode-s3 {
-  flex-shrink: 0;
-  margin-left: auto;
-}
-.tnode-children {
-  /* nested indentation handled by paddingLeft on each line */
-}
+/* TaskTreeNode 样式已迁到 @/components/TaskTreeNode.vue */
 </style>

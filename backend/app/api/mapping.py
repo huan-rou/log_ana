@@ -514,10 +514,18 @@ def _build_tree_response_dict(
     tree: TestTaskTree,
     s3_probe: Optional[Dict[str, bool]] = None,
 ) -> dict:
-    """把 TestTaskTree + 节点列表组装成 API 响应。"""
+    """把 TestTaskTree + 节点列表组装成 API 响应。
+
+    响应字段：
+      nodes  — 扁平节点列表（保留兼容老前端/旧调用方）
+      tree   — 嵌套树形结构（root dict + children 递归；前端 TaskTreeNode 用这个）
+    """
     s3_probe = s3_probe or {}
     nodes_resp: List[dict] = []
     leaf_count = 0
+    children_map: Dict[Optional[str], List[dict]] = {}
+    node_by_id: Dict[str, dict] = {}
+
     for n in tree.nodes:
         item = {
             "id": n.id,
@@ -531,10 +539,28 @@ def _build_tree_response_dict(
             "sort_order": n.sort_order,
             "extra": n.extra,
             "s3_matched": s3_probe.get(n.node_id) if n.is_leaf else None,
+            "children": [],
         }
         nodes_resp.append(item)
+        node_by_id[n.id] = item
+        children_map.setdefault(n.parent_id, []).append(item)
         if n.is_leaf:
             leaf_count += 1
+
+    # 回填 children 引用
+    for parent_id, kids in children_map.items():
+        if parent_id is None:
+            continue
+        parent_node = node_by_id.get(parent_id)
+        if parent_node is not None:
+            parent_node["children"] = kids
+
+    # 找 root（parent_id is None）
+    root = next(
+        (v for v in node_by_id.values() if v["parent_id"] is None),
+        None,
+    )
+
     return {
         "id": tree.id,
         "version_id": tree.version_id,
@@ -545,6 +571,7 @@ def _build_tree_response_dict(
         "total_nodes": len(nodes_resp),
         "leaf_count": leaf_count,
         "nodes": nodes_resp,
+        "tree": root,  # 嵌套树形结构；为 None 表示空树
         "created_at": tree.created_at,
         "parsed_at": tree.parsed_at,
     }
