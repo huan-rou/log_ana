@@ -19,7 +19,8 @@
 018057e  feat(core): v5 logging setup + key path logger + 26 unit tests
 f32dca4  feat(frontend): v5 API client methods + smoke test (72 assertions)
 e988a35  feat(frontend): v5 MappingManager — JSON 树按轮次管理主区块
-<NEW>     feat(frontend): v5 TaskDetail — JSON 树视图（单轮次/整体）
+6c510d9  feat(frontend): v5 TaskDetail — JSON 树视图（单轮次/整体）
+<NEW>     test: v5 integration — 跨版本隔离 / 轮次复用 / 边界场景（17 测试）
 ```
 
 ### 已落地的代码
@@ -216,17 +217,43 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - **selected 态**：选中节点蓝色背景 + 白字 + 反色 tag
 - **验证**：vite build EXIT=0；backend 94 测试仍全过；frontend API 72 断言仍全过
 
-### 第 11 步 — 集成测试
-- 路径：`backend/tests/test_task_tree_api.py`（新建）
-- 覆盖：
-  - POST /tree?mode=preview 不写库
-  - POST /tree?mode=append 跨 round 冲突回滚
-  - POST /tree/auto-fetch 503
-  - PUT /trees/{round}/note
-  - GET /aggregate?tree_node_id=... 返回 execution_count / latest_round / missing_rounds
-  - GET /aggregate/testcases?tree_node_id=... 返回 TestCase 维度数据
-  - GET /testcases?tree_node_id=...&round_filter=N 返回单 round 的 TestCase 行
-- 前端手动验证：见 v5 计划第 8.3 节
+### 第 11 步 — 集成测试 ✅
+- 路径：`backend/tests/test_task_tree_api.py`（新建，17 测试全过）
+- **覆盖计划 7 项**（test_mapping_api.py + test_analysis_api.py 已覆盖基础流程）：
+  - POST /tree?mode=preview 不写库 ✅（test_preview_does_not_write_db）
+  - POST /tree?mode=append 跨 round 冲突回滚 ✅（test_append_cross_round_conflict_rejected）
+  - POST /tree/auto-fetch 503 ✅（test_auto_fetch_returns_503）
+  - PUT /trees/{round}/note ✅（test_update_note）
+  - GET /aggregate?tree_node_id=... ✅（test_aggregate_node / test_aggregate_node_missing_round）
+  - GET /aggregate/testcases?tree_node_id=... ✅（test_aggregate_testcases）
+  - GET /testcases?tree_node_id=... ✅（test_list_testcases_in_round）
+- **本文件补充 17 个集成边界测试**：
+  - **跨版本隔离**：test_cross_version_leaf_id_does_not_conflict（同 leaf Id 在不同 version 下不冲突）
+  - **轮次号分配策略（MAX+1）**：
+    - test_round_reuse_after_delete（delete 末位 round 后复用空位 → MAX+1）
+    - test_round_increment_after_delete_middle（delete 中间 round → MAX+1 用后续号）
+  - **输入校验**：
+    - test_append_empty_note_rejected（空 note → 422）
+    - test_append_malformed_json_returns_400（JSON 解析失败 → 400）
+    - test_append_missing_id_field_returns_400（缺 Id 字段 → 400）
+  - **备注边界**：
+    - test_update_note_unicode_and_long（unicode + 长文本 OK）
+    - test_update_note_empty_rejected（空字符串 OK，记录现状）
+  - **聚合边界**：
+    - test_aggregate_single_round_no_missing（单 round：missing_rounds=[]）
+    - test_aggregate_node_not_found_returns_404
+  - **老任务兼容**：
+    - test_testcases_for_task_without_tree_node_id_returns_empty（降级为 round_number=null）
+    - test_aggregate_for_task_without_version_returns_404
+  - **全部 S3 missing**：
+    - test_create_tasks_all_s3_missing（created=[], linked=[], skipped=[全部]）
+  - **树形深度**：
+    - test_deeply_nested_tree_round_trip（4 层嵌套 round-trip）
+    - test_single_node_tree_is_its_own_leaf（单节点即叶子）
+  - **E2E 冒烟**：
+    - test_e2e_workflow_append_create_aggregate（完整流程：append → create → aggregate → agg_testcases）
+    - test_e2e_two_rounds_with_one_missing（2 round 含 missing，验证聚合正确）
+- **前端手动验证**：见 v5 计划第 8.3 节
 
 ## 关键设计判断（避免重复踩坑）
 
@@ -294,5 +321,25 @@ npm run dev
 - ✅ 日志设施（`logging_setup.py` + `app_debug_logging` + 17 单测 + 9 关键路径验证）
 - ✅ 前端 API 客户端（mappingApi +8 / analysisApi +5 + analysis.files 扩展 + 72 烟雾断言）
 - ✅ MappingManager.vue（轮次表 + 4 个新弹窗 + 内联 TaskTreeNode）
-- ✅ TaskDetail.vue（JSON 树视图 Tab + 单轮次/整体 内嵌 Tab + 老任务空态 + 内联 TaskTreeNodeView）—— **第 10 步完成**
-- ⏳ 集成测试 —— **下一步**
+- ✅ TaskDetail.vue（JSON 树视图 Tab + 单轮次/整体 内嵌 Tab + 老任务空态 + 内联 TaskTreeNodeView）
+- ✅ 集成测试（17 个边界场景：跨版本隔离 / 轮次复用 / 输入校验 / 备注边界 / 聚合边界 / 老任务兼容 / 全 S3 missing / 树形深度 / E2E 冒烟）—— **第 11 步完成**
+
+## 🎉 v5 计划全部完成（11/11 步）
+
+| 步骤 | 状态 | commit |
+|---|---|---|
+| 1. 数据模型 | ✅ | 8aaf7ec |
+| 2. 解析器 | ✅ | 1ecf539 |
+| 3. S3 探测 | ✅ | 7a7b5ac |
+| 4. Mapping API | ✅ | 859cb6f |
+| 5. Analysis API | ✅ | 9a99800 |
+| 6. 日志设施 | ✅ | 018057e |
+| 7. 前端 API 客户端 | ✅ | f32dca4 |
+| 8. MappingManager.vue | ✅ | e988a35 |
+| 9. TaskDetail.vue | ✅ | 6c510d9 |
+| 10. 集成测试 | ✅ | <NEW> |
+
+**最终测试结果**：
+- backend: **111 测试全过**（68 v3/v4 + 17 logging + 17 集成 + 9 logger path）
+- frontend: **72 烟雾断言全过**（API 客户端）
+- frontend build: **EXIT=0**（生产构建）
