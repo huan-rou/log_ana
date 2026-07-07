@@ -15,8 +15,9 @@
 7a7b5ac  feat(services): S3 probe + 14 unit tests
 859cb6f  feat(api): v5 mapping endpoints for JSON tree (6 endpoints + 14 tests)
 9a99800  feat(api): v5 analysis endpoints + suite LogFile matching (11 tests)
-<NEW>     docs: mark Analysis API step complete
-<NEW>     feat(core): v5 logging setup + key path logger + 26 unit tests
+0cf1cff  docs: mark Analysis API step complete
+018057e  feat(core): v5 logging setup + key path logger + 26 unit tests
+<NEW>     feat(frontend): v5 API client methods + smoke test (72 assertions)
 ```
 
 ### 已落地的代码
@@ -141,26 +142,30 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - 输出：stdout + 可选 log_file
 - 关键路径日志清单见 v5 计划第 9.4 节（已全部覆盖）
 
-### 第 8 步 — 前端 API 客户端
+### 第 8 步 — 前端 API 客户端 ✅
 - 路径：`frontend/src/api/index.js`
-- 新增方法：
+- 新增方法（mappingApi 8 个 + analysisApi 5 个）：
   ```js
-  mapping.previewTree(versionId, jsonText)
-  mapping.appendTree(versionId, jsonText, note)
-  mapping.updateNote(versionId, round, note)
-  mapping.listTrees(versionId)
-  mapping.getTree(versionId, round)
-  mapping.deleteTree(versionId, round)
-  mapping.createTasksFromTree(versionId, round)
-  mapping.autoFetchTree(versionId, executionId)
-  analysis.getTaskTrees(taskId)
-  analysis.getTaskTree(taskId, round)
-  analysis.getAggregate(taskId, treeNodeId)
-  analysis.getAggregateTestcases(taskId, treeNodeId)
-  analysis.getTestcases(taskId, { tree_node_id, round_filter })
-  analysis.files(taskId, { ..., tree_node_id, round_filter })  // 扩展
+  mapping.previewTree(versionId, jsonText)             // POST /tree?mode=preview, 120s timeout
+  mapping.appendTree(versionId, jsonText, note)        // POST /tree/append?note=, 60s timeout
+  mapping.updateNote(versionId, round, note)           // PUT /trees/{r}/note
+  mapping.listTrees(versionId)                         // GET /trees
+  mapping.getTree(versionId, round, {includeS3Probe})  // GET /trees/{r}?include_s3_probe=
+  mapping.deleteTree(versionId, round)                 // DELETE /trees/{r}
+  mapping.createTasksFromTree(versionId, round)        // POST /trees/{r}/create_tasks, 120s
+  mapping.autoFetchTree(versionId, executionId)        // POST /tree/auto-fetch?execution_id=
+
+  analysis.getTaskTrees(taskId)                        // GET /analysis/{t}/trees
+  analysis.getTaskTree(taskId, round=null)             // GET /analysis/{t}/tree (round 缺省)
+  analysis.getAggregate(taskId, treeNodeId)            // GET /analysis/{t}/aggregate
+  analysis.getAggregateTestcases(taskId, treeNodeId)   // GET /analysis/{t}/aggregate/testcases
+  analysis.getTestcases(taskId, {treeNodeId})          // GET /analysis/{t}/testcases
   ```
-- **保持 `analysis.files` 现有参数向后兼容**（v3.1 已有 `summary_result` 参数）
+- **`analysis.files` 向后兼容**：保留 v3.1 现有参数（review_status / file_type / category_id / is_fallback / summary_result），新增 `treeNodeId` 和 `roundFilter` 两个 camelCase 入参，内部映射成 snake_case query
+- **input validation** 在 API 边界做：previewTree/appendTree/updateNote 拒绝空 jsonText/空 note；getAggregate/getAggregateTestcases 拒绝空 treeNodeId
+- **timeout 分级**：previewTree 120s（8 并发 S3 探测）/ appendTree 60s / createTasksFromTree 120s / getTree 60s（开 S3 时）/ 默认 30s
+- **`frontend/test-api-v5.cjs`**：esbuild bundle + axios mock 烟雾测试，**72 个断言全过**（28 shape + 44 behavioral）
+- 全部 94 backend 单测 + 72 frontend 烟雾测试 = **166 通过**
 
 ### 第 9 步 — MappingManager.vue
 - 路径：`frontend/src/views/MappingManager.vue`
@@ -265,8 +270,8 @@ npm run dev
 - ✅ S3 探测（14 个单测全过；`probe_leaf_in_s3` / `probe_leaves_in_s3_batch`）
 - ✅ Mapping API（8 个端点 + 14 个集成测试全过）
 - ✅ Analysis API（5 个端点 + suite 匹配 + 11 个集成测试全过）
-- ✅ 日志设施（`logging_setup.py` + `app_debug_logging` + 17 单测 + 9 关键路径验证）—— **第 7 步完成**
-- ⏳ 前端 API 客户端 —— **下一步**
-- ⏳ MappingManager.vue
+- ✅ 日志设施（`logging_setup.py` + `app_debug_logging` + 17 单测 + 9 关键路径验证）
+- ✅ 前端 API 客户端（mappingApi +8 / analysisApi +5 + analysis.files 扩展 + 72 烟雾断言）—— **第 8 步完成**
+- ⏳ MappingManager.vue —— **下一步**
 - ⏳ TaskDetail.vue
 - ⏳ 集成测试
