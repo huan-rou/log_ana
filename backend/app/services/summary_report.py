@@ -4,11 +4,20 @@
 （testsuites[] → testcases[]，含 id/desc/result/start_time/end_time/fail_detail）。
 本模块供 API（展示原始结果列）与解析流水线（blocked 用例跳过分析）共用。
 任何读取/解析失败都返回 None，调用方不需要做异常处理。
+
+日志（v5 新增）：
+- find_suite_logfile: 5 步匹配过程 / 最终匹配结果 — DEBUG
+- summary_for_file: 找到 case_rec / 未找到 / suite 找到 / suite 缺失 — DEBUG
+- build_suite_response: suite 最终匹配结果（logfile_id） — DEBUG
+- load_summary_lookup: 读取 / 解析失败 — WARNING
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
+
+logger = logging.getLogger("app.services.summary_report")
 
 
 def stem(name: str) -> str:
@@ -84,7 +93,11 @@ async def load_summary_lookup(provider: str, path: str, cache: dict) -> Optional
         data = yaml.safe_load(content) if content else None
         if isinstance(data, dict) and isinstance(data.get("testsuites"), list):
             lookup = build_summary_lookup(data)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[summary.load] failed provider=%s path=%s err=%s",
+            provider, path, exc,
+        )
         lookup = None
 
     cache[key] = lookup
@@ -162,15 +175,32 @@ def summary_for_file(log_file, lookup: Optional[dict], source_path: str) -> Opti
     if log_file.file_type == "testcase":
         case_rec = find_case(lookup, log_file.testcase_name, stem(log_file.name))
         if not case_rec:
+            logger.debug(
+                "[summary.for_file] case_not_found log_file_id=%s name=%s testcase_name=%s",
+                getattr(log_file, "id", None), log_file.name, log_file.testcase_name,
+            )
             return None
         suite_rec = case_rec.get("suite")
+        logger.debug(
+            "[summary.for_file] case_found log_file_id=%s case_id=%s suite_id=%s",
+            getattr(log_file, "id", None), case_rec.get("id"),
+            suite_rec.get("id") if suite_rec else None,
+        )
     elif log_file.file_type == "testsuite":
         cand = stem(log_file.name)
         suite_rec = lookup["suites"].get(cand)
         if not suite_rec and len(lookup["suite_list"]) == 1:
             suite_rec = lookup["suite_list"][0]  # 单套件兜底
         if not suite_rec:
+            logger.debug(
+                "[summary.for_file] suite_not_found log_file_id=%s name=%s",
+                getattr(log_file, "id", None), log_file.name,
+            )
             return None
+        logger.debug(
+            "[summary.for_file] suite_found log_file_id=%s suite_id=%s",
+            getattr(log_file, "id", None), suite_rec.get("id"),
+        )
     else:
         return None  # task_log 等不关联原始结果
 
@@ -229,9 +259,32 @@ def find_suite_logfile(suite_info: Optional[dict], suite_logfiles: list) -> Opti
             if not cand:
                 continue
             if cand == lf_stem:
+                logger.debug(
+                    "[find_suite_logfile] match strategy=stem_exact "
+                    "suite_id=%s matched_lf_id=%s",
+                    suite_info.get("id"), getattr(lf, "id", None),
+                )
                 return lf
-            if cand in lf_stem or lf_stem in cand:
+            if cand in lf_stem:
+                logger.debug(
+                    "[find_suite_logfile] match strategy=substring "
+                    "suite_id=%s matched_lf_id=%s",
+                    suite_info.get("id"), getattr(lf, "id", None),
+                )
                 return lf
+            if lf_stem in cand:
+                logger.debug(
+                    "[find_suite_logfile] match strategy=reverse_substring "
+                    "suite_id=%s matched_lf_id=%s",
+                    suite_info.get("id"), getattr(lf, "id", None),
+                )
+                return lf
+
+    logger.warning(
+        "[find_suite_logfile] no_match suite_id=%s suite_desc=%s "
+        "candidate_logfiles=%d reason=no_candidate_match",
+        suite_info.get("id"), suite_info.get("desc"), len(suite_logfiles),
+    )
     return None
 
 
@@ -249,6 +302,11 @@ def build_suite_response(
 
     fail_detail = str(suite_info.get("fail_detail") or "")
     lf = find_suite_logfile(suite_info, suite_logfiles)
+
+    logger.debug(
+        "[build_suite_response] suite_id=%s logfile_id=%s",
+        suite_info.get("id"), getattr(lf, "id", None) if lf else None,
+    )
 
     return {
         "id": suite_info.get("id"),

@@ -15,6 +15,7 @@ from app.api import tasks, logs, analysis, feedback, rules as rules_api, browse,
 from app.api import auth, mapping
 from app.services.storage.provider_manager import init_providers, shutdown_providers
 from app.core.audit_logger import init_audit_logger
+from app.core.logging_setup import setup_logging
 from app.services.rule_registry import rule_registry
 from app.database import async_session
 
@@ -23,6 +24,16 @@ logger = logging.getLogger("app.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # 1. logging 设施最先装——后续 init_db / rule discover 都要打日志
+    setup_logging(
+        enabled=settings.app_debug_logging,
+        log_file=settings.log_file,
+    )
+    logger.warning(
+        "[startup] logging enabled=%s log_file=%s",
+        settings.app_debug_logging, settings.log_file,
+    )
+
     logger.warning("[startup] init_db starting")
     try:
         await init_db()

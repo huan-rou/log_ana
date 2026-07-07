@@ -239,6 +239,12 @@ async def list_analyzed_files(
     """获取任务分析过的日志文件列表（每文件一行，含最终结论与审核状态）。"""
     from app.models.task import LogFile
 
+    logger.info(
+        "[list_analyzed_files] task_id=%s review_status=%s file_type=%s "
+        "category_id=%s is_fallback=%s summary_result=%s",
+        task_id, review_status, file_type, category_id, is_fallback, summary_result,
+    )
+
     query = select(LogFile).where(LogFile.task_id == task_id).order_by(LogFile.name)
     if review_status:
         query = query.where(LogFile.review_status == review_status)
@@ -251,6 +257,8 @@ async def list_analyzed_files(
 
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     report_cache: dict = {}
+
+    raw_count = len(files)
 
     out = []
     for f in files:
@@ -308,6 +316,11 @@ async def list_analyzed_files(
                 "rule_id": primary[1].rule_id if primary[1] else None,
             } if primary else None,
         })
+
+    logger.info(
+        "[list_analyzed_files] task_id=%s raw_count=%d filtered_count=%d",
+        task_id, raw_count, len(out),
+    )
     return out
 
 

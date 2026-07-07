@@ -15,6 +15,8 @@
 7a7b5ac  feat(services): S3 probe + 14 unit tests
 859cb6f  feat(api): v5 mapping endpoints for JSON tree (6 endpoints + 14 tests)
 9a99800  feat(api): v5 analysis endpoints + suite LogFile matching (11 tests)
+<NEW>     docs: mark Analysis API step complete
+<NEW>     feat(core): v5 logging setup + key path logger + 26 unit tests
 ```
 
 ### 已落地的代码
@@ -31,7 +33,7 @@
 | `backend/tests/__init__.py` | ✅ 新建 | 测试包初始化 |
 | `backend/conftest.py` | ✅ 新建 | pytest 全局配置（用内存 SQLite） |
 | `backend/app/services/task_tree_s3.py` | ✅ 新建 | S3 探测：`probe_leaf_in_s3` / `probe_leaves_in_s3_batch` |
-| `backend/app/api/mapping.py` | ✅ 改动 | 6 个 v5 端点（preview/append/list/get/delete/create_tasks/auto-fetch/note）|
+| `backend/app/api/mapping.py` | ✅ 改动 | 8 个 v5 端点（preview/append/list/get/delete/create_tasks/auto-fetch/note）|
 | `backend/app/models/task.py` | ✅ 改动 | **bug 修复**：Task.tree_node_id 之前误加在 LogFile 类，已移到 Task 类 |
 | `backend/app/services/task_tree.py` | ✅ 改动 | `check_cross_round_id_conflict` 改为 async（DB 查询需要 await）|
 | `backend/app/services/task_tree_aggregate.py` | ✅ 新建 | 聚合算法：`aggregate_by_name_key` / `aggregate_testcases_by_name_key` / `list_testcases_in_round` |
@@ -40,6 +42,13 @@
 | `backend/tests/test_mapping_api.py` | ✅ 新建 | 14 个 mapping 集成测试 |
 | `backend/tests/test_analysis_api.py` | ✅ 新建 | 11 个 analysis 集成测试 |
 | `backend/pyproject.toml` | ✅ 改动 | `[tool.pytest.ini_options] asyncio_mode = "auto"` |
+| `backend/app/core/logging_setup.py` | ✅ 新建 | `setup_logging(enabled, log_file, *, force)` |
+| `backend/app/config.py` | ✅ 改动 | 加 `app_debug_logging: bool = True` + `log_file: Path` |
+| `backend/app/main.py` | ✅ 改动 | lifespan 启动时调 `setup_logging(settings.app_debug_logging, settings.log_file)` |
+| `backend/app/services/summary_report.py` | ✅ 改动 | 关键路径加 DEBUG/WARNING logger（v5 第 9.4 节）|
+| `backend/app/api/analysis.py` | ✅ 改动 | `list_analyzed_files` 加响应组装 INFO logger |
+| `backend/tests/test_logging_setup.py` | ✅ 新建 | 17 个 logging_setup 单测（**全过**）|
+| `backend/tests/test_logger_paths.py` | ✅ 新建 | 9 个关键路径日志存在性单测（**全过**）|
 
 ### 关键 API 已就绪
 
@@ -54,17 +63,28 @@ compute_name_key(name: str) -> str
 
 check_cross_round_id_conflict(db, version_id, new_leaf_ids) -> list[dict]
 # 返回 [{ node_id, conflicting_round, conflicting_tree_node_id }] 冲突列表；空 = 无冲突
+
+# backend/app/core/logging_setup.py
+setup_logging(enabled: bool, log_file: Optional[Path] = None, *, force: bool = False) -> None
+# enabled=True:  root=INFO, app.*=DEBUG；输出 stdout + 可选 log_file
+# enabled=False: root=WARNING, app.*=WARNING
+# 幂等：重复调用不重复装 handler
+# 与 audit_logger 互不干扰
+
+teardown_logging() -> None
+# 仅测试用：清掉 setup_logging 装的 handler
 ```
 
 ### 单测结果
 ```bash
 $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
-======================= 68 passed, 43 warnings in 9.33s ======================
+======================= 94 passed, 43 warnings in 9.01s ======================
+# 68 解析器/S3/mapping/analysis + 17 logging_setup + 9 logger_paths = 94
 ```
 
 ## 待办（按依赖顺序）
 
-### 第 4 步 — S3 探测
+### 第 4 步 — S3 探测 ✅
 - 路径：`backend/app/services/task_tree_s3.py`（新建）
 - 作用：探测 `s3://<bucket>/<prefix>/<version_name>/<leaf_id>/` 下是否有任意子条目
 - 接口：
@@ -75,12 +95,12 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - 并发探测：用 `asyncio.gather` 并发跑多个 leaf
 - 关键 logger：`logger.debug("[s3.probe] version=%s leaf=%s has_data=%s", ...)`
 
-### 第 5 步 — Mapping API
+### 第 5 步 — Mapping API ✅
 - 路径：`backend/app/api/mapping.py`（现有文件加端点）
 - 现有 mapping.py 有 `TestVersion` / `TestPurpose` / `TaskReference` 管理端点；v5 在同一文件加 JSON 树管理端点
 - 新增端点：
   - `POST /api/mapping/versions/{version_id}/tree?mode=preview` — 预览（不写库）
-  - `POST /api/mapping/versions/{version_id}/tree?mode=append` — 追加（写库 + 跨 round 冲突检查）
+  - `POST /api/mapping/versions/{version_id}/tree?mode=append` — 追加（写库 + 跨 round 冲突检查）→ 实际路由：`/tree/append`
   - `GET /api/mapping/versions/{version_id}/trees` — 列所有轮次
   - `GET /api/mapping/versions/{version_id}/trees/{round_number}` — 拉取指定轮次
   - `DELETE /api/mapping/versions/{version_id}/trees/{round_number}` — 删除
@@ -90,7 +110,7 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - round 分配：事务内 `SELECT MAX(round_number) WHERE version_id=?` + 1；UNIQUE 约束兜底
 - 删除 round：先 `UPDATE tasks SET tree_node_id=NULL WHERE tree_node_id IN (...)` 再删节点和树
 
-### 第 6 步 — Analysis API
+### 第 6 步 — Analysis API ✅
 - 路径：`backend/app/api/analysis.py`（现有文件加端点）
 - 现有端点：`POST /:task_id/run`、`GET /:task_id/files`、`GET /files/:file_id`、`GET /:task_id/results` 等
 - 新增端点：
@@ -108,7 +128,7 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - 复用现有 `summary_for_file`（`backend/app/services/summary_report.py`）返回 `summary_report` 字段
 - **suite 信息从 summary_report.yaml 拿**——`case_rec["suite"]` 已有父 suite 引用
 
-### 第 7 步 — 日志设施
+### 第 7 步 — 日志设施 ✅
 - 路径：`backend/app/core/logging_setup.py`（新建）
 - 改动：`backend/app/config.py` 加 `app_debug_logging: bool = True` 和 `log_file: Path`
 - 改动：`backend/app/main.py` lifespan 启动时调 `setup_logging(settings.app_debug_logging, settings.log_file)`
@@ -119,7 +139,7 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - enabled=False → 全 WARNING
 - 格式：`%(asctime)s [%(levelname)s] %(name)s: %(message)s`
 - 输出：stdout + 可选 log_file
-- 关键路径日志清单见 v5 计划第 9.4 节
+- 关键路径日志清单见 v5 计划第 9.4 节（已全部覆盖）
 
 ### 第 8 步 — 前端 API 客户端
 - 路径：`frontend/src/api/index.js`
@@ -207,22 +227,31 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - **audit_logger 保持**（分析流水线结构化审计，按 task_id 维度，JSONL）
 - **新 logger 覆盖**：JSON 树、聚合、S3 探测、API 响应等路径（按时间维度，文本）
 - **不重复**：分析流水线已有 audit_logger 的路径不再加 logger
+- **setup_logging 幂等**：handler 带 `_app_logging_setup_done` 标记，重复调用不重复装；teardown 只清自己装的
+- **测试隔离**：`conftest.py` 设 `LA_APP_DEBUG_LOGGING=false` → 新加 logger.info/debug 不会污染测试输出
 
 ### 5. TestSuite LogFile 匹配失败的处理
 - 当前 S3 目录 `artifacts/testsuite/` 下文件名（如 `testsuename.html`）可能跟 suite.id 不一致
 - 5 步启发式匹配可能失败
 - **降级策略**：`suite.logfile_id=null`，UI 显示 suite 名字信息但链接缺失
+- **`find_suite_logfile` 找不到时记 WARNING**（含 suite_id / suite_desc / candidate 数），便于排查
 - `rustfs-folder-design.md` 可加一条命名建议：testsuite HTML 文件名用 `TS_id.html` 格式
 
 ## 启动时环境
 
 ```bash
-# 跑解析器单测（确认基础设施正常）
+# 跑全部单测
 cd D:\log_analyzer\backend
-.venv\Scripts\python.exe -m pytest tests/test_task_tree.py -v
+.venv\Scripts\python.exe -m pytest tests/
 
-# 启动后端
+# 跑特定模块
+.venv\Scripts\python.exe -m pytest tests/test_logging_setup.py -v
+.venv\Scripts\python.exe -m pytest tests/test_logger_paths.py -v
+
+# 启动后端（默认开 logging 到 stdout；通过 LA_LOG_FILE 改写到文件）
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload
+# 发布：关 debug logging
+LA_APP_DEBUG_LOGGING=false .venv\Scripts\python.exe -m uvicorn app.main:app
 
 # 启动前端
 cd D:\log_analyzer\frontend
@@ -236,8 +265,8 @@ npm run dev
 - ✅ S3 探测（14 个单测全过；`probe_leaf_in_s3` / `probe_leaves_in_s3_batch`）
 - ✅ Mapping API（8 个端点 + 14 个集成测试全过）
 - ✅ Analysis API（5 个端点 + suite 匹配 + 11 个集成测试全过）
-- ⏳ 日志设施（`logging_setup.py` + `app_debug_logging`）—— **下一步**
-- ⏳ 前端 API 客户端
+- ✅ 日志设施（`logging_setup.py` + `app_debug_logging` + 17 单测 + 9 关键路径验证）—— **第 7 步完成**
+- ⏳ 前端 API 客户端 —— **下一步**
 - ⏳ MappingManager.vue
 - ⏳ TaskDetail.vue
 - ⏳ 集成测试
