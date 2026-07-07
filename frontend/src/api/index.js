@@ -62,6 +62,18 @@ export const logApi = {
 // ── Analysis ──
 export const analysisApi = {
   run: (taskId) => api.post(`/analysis/${taskId}/run`),
+  // 完整重分析：清旧数据 → 重跑 parse/detect/classify
+  // body = { preserve_review?: bool }；返回 { task_id, status, deleted }
+  rerun: (taskId, opts = {}) => api.post(`/analysis/${taskId}/rerun`, {
+    preserve_review: !!opts.preserve_review,
+  }),
+  // 批量启动：body = { task_ids: [str] }；返回 { started, skipped, errors }
+  runBatch: (taskIds) => api.post('/analysis/run_batch', { task_ids: taskIds }),
+  // 批量重分析：body = { task_ids: [str], preserve_review?: bool }
+  rerunBatch: (taskIds, opts = {}) => api.post('/analysis/rerun_batch', {
+    task_ids: taskIds,
+    preserve_review: !!opts.preserve_review,
+  }),
   results: (taskId, params) => api.get(`/analysis/${taskId}/results`, { params }),
   resultDetail: (resultId) => api.get(`/analysis/results/${resultId}`),
   dashboard: (taskId) => api.get(`/analysis/${taskId}/dashboard`),

@@ -105,6 +105,48 @@ async function handleRun() {
   } catch {}
 }
 
+// ════════════════════════════════════════════════════════════════
+// 完整重分析（清旧数据 + 重跑 parse/detect/classify）
+// ════════════════════════════════════════════════════════════════
+
+const rerunDialogVisible = ref(false)
+const rerunSubmitting = ref(false)
+const rerunPreserveReview = ref(false)
+const rerunResult = ref(null)
+
+function canRerun() {
+  // 只有 completed/failed 才能 rerun
+  return task.value && (task.value.status === 'completed' || task.value.status === 'failed')
+}
+
+function openRerunDialog() {
+  rerunPreserveReview.value = false
+  rerunResult.value = null
+  rerunDialogVisible.value = true
+}
+
+async function confirmRerun() {
+  rerunSubmitting.value = true
+  try {
+    const { data } = await analysisApi.rerun(taskId, {
+      preserve_review: rerunPreserveReview.value,
+    })
+    rerunResult.value = data
+    // 重置 task 状态让前端轮询接管
+    if (task.value) {
+      task.value.status = 'parsing'
+      task.value.error_message = null
+      task.value.total_entries = 0
+      task.value.failure_count = 0
+      task.value.classified_count = 0
+      task.value.unrecognized_count = 0
+    }
+    startAutoRefresh()
+  } finally {
+    rerunSubmitting.value = false
+  }
+}
+
 async function loadFiles() {
   filesLoading.value = true
   try {
@@ -646,6 +688,20 @@ const s3PathText = computed(() => {
           <el-icon><VideoPlay /></el-icon>
           运行分析
         </el-button>
+        <el-tooltip
+          v-if="canStartTask && canRerun()"
+          content="清空已有 LogEntry / FailureEvent / AnalysisResult / Feedback 后重跑完整流水线（应用最新解析 / 检测 / 规则代码）"
+          placement="bottom"
+        >
+          <el-button
+            type="warning"
+            plain
+            @click="openRerunDialog"
+          >
+            <el-icon><Refresh /></el-icon>
+            重新分析
+          </el-button>
+        </el-tooltip>
       </template>
     </AppPageHeader>
 
@@ -656,6 +712,81 @@ const s3PathText = computed(() => {
       :closable="false"
       class="error-msg"
     />
+
+    <!-- ════════════════════════════════════════════════════════════════ -->
+    <!-- 重新分析对话框（v6）                                            -->
+    <!-- ════════════════════════════════════════════════════════════════ -->
+    <el-dialog
+      v-model="rerunDialogVisible"
+      :title="rerunResult ? '重新分析已启动' : '完整重新分析'"
+      width="560px"
+      :close-on-click-modal="false"
+    >
+      <template v-if="rerunResult">
+        <el-alert
+          type="success"
+          :closable="false"
+          :title="`任务已进入重新分析流水线（${rerunResult.preserve_review ? '保留人工结论' : '已重置人工结论'}）`"
+        />
+        <h4 class="rerun-sub-title">已清理的旧数据</h4>
+        <el-row :gutter="8">
+          <el-col :span="8"><div class="rerun-stat"><span class="num">{{ rerunResult.deleted?.log_entries ?? 0 }}</span><span class="lbl">日志条目</span></div></el-col>
+          <el-col :span="8"><div class="rerun-stat"><span class="num">{{ rerunResult.deleted?.failure_events ?? 0 }}</span><span class="lbl">失败事件</span></div></el-col>
+          <el-col :span="8"><div class="rerun-stat"><span class="num">{{ rerunResult.deleted?.analysis_results ?? 0 }}</span><span class="lbl">分析结果</span></div></el-col>
+        </el-row>
+        <el-row :gutter="8" style="margin-top: 8px">
+          <el-col :span="8"><div class="rerun-stat"><span class="num">{{ rerunResult.deleted?.feedback ?? 0 }}</span><span class="lbl">反馈记录</span></div></el-col>
+          <el-col :span="8"><div class="rerun-stat"><span class="num">{{ rerunResult.deleted?.testcases ?? 0 }}</span><span class="lbl">用例记录</span></div></el-col>
+          <el-col v-if="!rerunResult.preserve_review" :span="8"><div class="rerun-stat"><span class="num">{{ rerunResult.deleted?.log_files_reset ?? 0 }}</span><span class="lbl">文件审核心</span></div></el-col>
+        </el-row>
+        <p class="rerun-foot">
+          任务状态已切到 <code>parsing</code>，后台流水线已经在跑。页面会自动刷新状态。
+        </p>
+      </template>
+
+      <template v-else>
+        <el-alert
+          type="warning"
+          :closable="false"
+          style="margin-bottom: 12px"
+          show-icon
+        >
+          <template #title>
+            <strong>此操作不可逆。</strong>将删除现有日志条目、失败事件、分析结果、反馈，
+            然后从 <code>parsing</code> 重新开始一整条分析流水线。
+          </template>
+        </el-alert>
+
+        <el-form label-width="120px">
+          <el-form-item label="保留人工审核">
+            <el-switch v-model="rerunPreserveReview" />
+            <div class="form-hint">
+              <strong v-if="rerunPreserveReview">已开启：</strong>
+              <strong v-else>默认关闭（推荐）：</strong>
+              <span v-if="rerunPreserveReview">
+                LogFile 上的人工覆盖/确认结论保留，但因底下的 AnalysisResult 变了，可能出现不一致。
+              </span>
+              <span v-else>
+                会把 LogFile 的 review_status 全部重置为 <code>pending</code>，清空所有 override 字段，
+                并清理 ArchivedReview / HighValueRecord 标记。
+              </span>
+            </div>
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <template #footer>
+        <el-button @click="rerunDialogVisible = false">关闭</el-button>
+        <el-button
+          v-if="!rerunResult"
+          type="warning"
+          :loading="rerunSubmitting"
+          @click="confirmRerun"
+        >
+          {{ rerunPreserveReview ? '确认重新分析（保留审核）' : '确认重新分析（重置审核）' }}
+        </el-button>
+      </template>
+    </el-dialog>
 
     <AppSection title="任务概览" v-if="task">
       <el-row :gutter="16" class="stat-row">
@@ -1256,6 +1387,57 @@ const s3PathText = computed(() => {
 
 .error-msg {
   margin-bottom: var(--space-section);
+}
+
+/* ── 重新分析对话框 ── */
+.rerun-sub-title {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  margin: 16px 0 8px;
+}
+.rerun-stat {
+  text-align: center;
+  padding: 10px 4px;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+}
+.rerun-stat .num {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.rerun-stat .lbl {
+  display: block;
+  font-size: var(--text-tiny);
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.rerun-foot {
+  margin-top: 12px;
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+.rerun-foot code {
+  padding: 1px 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.form-hint {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.form-hint code {
+  padding: 0 3px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .meta-item {
