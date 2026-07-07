@@ -583,7 +583,9 @@ async def manage_task_tree(
 
     if mode == "preview":
         # 预览：S3 探测 + 跨 round 冲突检查（不写库）
-        s3_probe = await probe_leaves_in_s3_batch(version_id, leaf_node_ids)
+        # v5.5 fix: 传 version.version_name，不是 version_id
+        version = await _get_version_or_404(db, version_id)
+        s3_probe = await probe_leaves_in_s3_batch(version.version_name, leaf_node_ids)
         conflicts = await check_cross_round_id_conflict(db, version_id, leaf_node_ids)
 
         logger.info(
@@ -712,7 +714,9 @@ async def get_task_tree(
     s3_probe: Dict[str, bool] = {}
     if include_s3_probe:
         leaf_ids = [n.node_id for n in (tree.nodes or []) if n.is_leaf]
-        s3_probe = await probe_leaves_in_s3_batch(tree.version.name if hasattr(tree, "version") else version_id, leaf_ids)
+        # v5.5 fix: 必须用 version.version_name（之前 fallback 错了，传的是 version_id 主键）
+        version = await _get_version_or_404(db, version_id)
+        s3_probe = await probe_leaves_in_s3_batch(version.version_name, leaf_ids)
     return _build_tree_response_dict(tree, s3_probe=s3_probe)
 
 

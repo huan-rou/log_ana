@@ -281,6 +281,73 @@ async def test_append_empty_note_rejected(client, db_session):
     assert resp.status_code == 422  # pydantic validation
 
 
+# ── v5.5 Regression: S3 探测必须用 version.version_name，不能用 version_id ──
+
+
+@pytest.mark.asyncio
+async def test_preview_uses_version_name_not_id(client, db_session):
+    """v5.5 regression: 预览调 S3 探测时必须传 version.version_name（不是 TestVersion 主键 ID）。
+
+    之前 bug：mapping.py:586 传的是 `version_id`（12 字符 hex 主键），导致 S3 路径变成
+    `s3://bucket/prefix/{uuid}/{leaf_id}/`，永远找不到。
+    """
+    v = TestVersion(version_name="1.3.00.903")
+    db_session.add(v)
+    await db_session.commit()
+    await db_session.refresh(v)
+
+    captured: dict = {}
+
+    async def capture(version_arg, leaf_ids, **_):
+        captured["version_arg"] = version_arg
+        captured["leaf_ids"] = list(leaf_ids)
+        return {"123456789012": True}
+
+    with patch("app.api.mapping.probe_leaves_in_s3_batch", new=capture):
+        resp = await client.post(
+            f"/api/mapping/versions/{v.id}/tree?mode=preview",
+            json={"json": JSON_TREE_A},
+        )
+    assert resp.status_code == 200
+    assert captured["version_arg"] == "1.3.00.903"  # 必须是 version_name
+    assert captured["version_arg"] != v.id  # 不能是 TestVersion 主键
+
+
+@pytest.mark.asyncio
+async def test_get_tree_with_s3_probe_uses_version_name_not_id(client, db_session):
+    """v5.5 regression: get_tree 带 include_s3_probe=true 时同样必须传 version.version_name。
+
+    之前 bug：mapping.py:715 那个 `tree.version.name if hasattr(tree, "version") else version_id`
+    是错的 fallback——TestTaskTree 没定义 version 关系，hasattr 永远 False。
+    """
+    v = TestVersion(version_name="1.3.00.903")
+    db_session.add(v)
+    await db_session.commit()
+    await db_session.refresh(v)
+
+    with patch("app.api.mapping.probe_leaves_in_s3_batch",
+               new=AsyncMock(return_value={"1000000000000000002": True})):
+        await client.post(
+            f"/api/mapping/versions/{v.id}/tree/append",
+            params={"note": "r1"}, json={"json": JSON_TREE_A},
+        )
+
+    captured: dict = {}
+
+    async def capture(version_arg, leaf_ids, **_):
+        captured["version_arg"] = version_arg
+        return {"1000000000000000002": True}
+
+    with patch("app.api.mapping.probe_leaves_in_s3_batch", new=capture):
+        resp = await client.get(
+            f"/api/mapping/versions/{v.id}/trees/1",
+            params={"include_s3_probe": "true"},
+        )
+    assert resp.status_code == 200
+    assert captured["version_arg"] == "1.3.00.903"
+    assert captured["version_arg"] != v.id
+
+
 @pytest.mark.asyncio
 async def test_append_malformed_json_returns_400(client, db_session):
     """v5.5: JSON 解析失败 → 400（不是 500）。"""

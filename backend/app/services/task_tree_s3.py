@@ -43,6 +43,13 @@ async def probe_leaf_in_s3(
         timeout: 单次探测超时秒数
     """
     path = _build_probe_path(version_name, leaf_id)
+    # v5.5 DEBUG：打印完整 S3 key 便于排错（对照 S3 控制台路径）
+    from app.config import settings as _settings
+    _full_key = f"s3://{_settings.s3_bucket}/{_settings.s3_prefix}/{version_name}/{leaf_id}/"
+    logger.debug(
+        "[s3.probe] version=%s leaf=%s full_key=%s",
+        version_name, leaf_id, _full_key,
+    )
     try:
         entries = await asyncio.wait_for(
             provider_manager.list_dir("s3", path),
@@ -50,23 +57,23 @@ async def probe_leaf_in_s3(
         )
     except asyncio.TimeoutError:
         logger.warning(
-            "[s3.probe] timeout version=%s leaf=%s timeout=%.1fs",
-            version_name, leaf_id, timeout,
+            "[s3.probe] timeout version=%s leaf=%s full_key=%s timeout=%.1fs",
+            version_name, leaf_id, _full_key, timeout,
         )
         return False
     except Exception as exc:
         # provider_manager.list_dir 自身可能 raise（如 S3 配置缺失、bucket 不存在）
         # 探测失败 → 视为无数据
         logger.warning(
-            "[s3.probe] failed version=%s leaf=%s err=%s",
-            version_name, leaf_id, exc,
+            "[s3.probe] failed version=%s leaf=%s full_key=%s err=%s",
+            version_name, leaf_id, _full_key, exc,
         )
         return False
 
     has_data = bool(entries)
     logger.debug(
-        "[s3.probe] version=%s leaf=%s has_data=%s entries=%d",
-        version_name, leaf_id, has_data, len(entries) if entries else 0,
+        "[s3.probe] result version=%s leaf=%s full_key=%s has_data=%s entries=%d",
+        version_name, leaf_id, _full_key, has_data, len(entries) if entries else 0,
     )
     return has_data
 
