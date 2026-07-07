@@ -17,7 +17,8 @@
 9a99800  feat(api): v5 analysis endpoints + suite LogFile matching (11 tests)
 0cf1cff  docs: mark Analysis API step complete
 018057e  feat(core): v5 logging setup + key path logger + 26 unit tests
-<NEW>     feat(frontend): v5 API client methods + smoke test (72 assertions)
+f32dca4  feat(frontend): v5 API client methods + smoke test (72 assertions)
+<NEW>     feat(frontend): v5 MappingManager — JSON 树按轮次管理主区块
 ```
 
 ### 已落地的代码
@@ -167,19 +168,28 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - **`frontend/test-api-v5.cjs`**：esbuild bundle + axios mock 烟雾测试，**72 个断言全过**（28 shape + 44 behavioral）
 - 全部 94 backend 单测 + 72 frontend 烟雾测试 = **166 通过**
 
-### 第 9 步 — MappingManager.vue
-- 路径：`frontend/src/views/MappingManager.vue`
-- 当前：版本列表 + 目的列表 + 轮次发现
-- 改造：加"JSON 树（按轮次管理）"区块
-  - 顶部摘要：所有轮次列表（每行：轮次 N + 根名 + 节点数 + 叶子数 + 备注 + 创建时间 + 操作按钮）
-  - "追加执行轮次" 主按钮：弹窗
-    - 备注（必填）
-    - JSON 粘贴框
-    - 解析预览（实时）：树形 + 叶子数 + S3 匹配 + 跨 round 冲突检查
-    - 占位按钮 "按执行 ID 自动获取"（503 + "即将推出"提示）
-    - 确认追加并创建任务按钮
-  - 已有轮次操作：[查看] [改备注] [按此次批量建任务] [删除]
-- TestPurpose 区域保留为 legacy，顶部加提示
+### 第 9 步 — MappingManager.vue ✅
+- 路径：`frontend/src/views/MappingManager.vue`（662 行新增）
+- **改造**：右侧主区域从单 section（TestPurpose）变成双 section
+  - **JSON 树（按轮次管理）**（primary，置顶）：轮次表 + 追加/查看/备注/建任务/删除
+  - **测试目的**（legacy，下方保留）：顶部加 `<el-alert>` 推荐改用上方 JSON 树
+- **轮次表**（7 列 + 操作）：轮次 #N / 根名 / 根节点 ID / 节点·叶子 / 备注 / 创建时间 / 操作
+- **追加执行轮次弹窗**（780px）：
+  - 备注（必填，200 字限）
+  - JSON 粘贴框（10 行，等宽字体）
+  - 解析预览按钮 → 调用 `mappingApi.previewTree`，展示节点·叶子·冲突·S3 匹配 4 个 tag + 折叠详情
+  - 占位按钮「按执行 ID 自动获取」（走 `autoFetchTree`，后端返 503 兜底提示）
+  - 「仅追加」+「追加并创建任务」两个按钮（冲突时禁用）
+- **查看树弹窗**：节点数·叶子数·S3 探测开关 + 内嵌 TaskTreeNode 渲染树
+- **改备注弹窗**：纯文本（200 字限）
+- **批量建任务结果弹窗**：3 列统计（新建/关联/跳过）+ 跳过叶子清单 + 新建 Task 表
+- **每行操作**：查看 / 备注 / 建任务 / 删除（确认对话框显示影响 task 数 + 警告不可恢复）
+- **内联 TaskTreeNode 组件**：脚本内定义，支持递归自引用，叶子节点蓝色 + 可选 S3 匹配 tag
+- **TestPurpose 区域保留**：所有原功能不动；新增 `<el-alert type="info">` 推荐用户改用上方 JSON 树
+- **切换 version**：同时清空轮次列表 + 重新加载（`handleVersionChange` 加 `loadTrees()`）
+- **响应式空态**：轮次表 empty-text 引导用户「点击右上角追加执行轮次开始」
+- vite build 验证：`MappingManager-BJ087RPb.js` + `MappingManager-DqVB3HnU.css` 输出正常
+- 样式 token 全部走 CSS 变量（`--space-*` / `--text-*` / `--color-*` / `--bg-*`），与全站统一
 
 ### 第 10 步 — TaskDetail.vue
 - 路径：`frontend/src/views/TaskDetail.vue`
@@ -271,7 +281,7 @@ npm run dev
 - ✅ Mapping API（8 个端点 + 14 个集成测试全过）
 - ✅ Analysis API（5 个端点 + suite 匹配 + 11 个集成测试全过）
 - ✅ 日志设施（`logging_setup.py` + `app_debug_logging` + 17 单测 + 9 关键路径验证）
-- ✅ 前端 API 客户端（mappingApi +8 / analysisApi +5 + analysis.files 扩展 + 72 烟雾断言）—— **第 8 步完成**
-- ⏳ MappingManager.vue —— **下一步**
-- ⏳ TaskDetail.vue
+- ✅ 前端 API 客户端（mappingApi +8 / analysisApi +5 + analysis.files 扩展 + 72 烟雾断言）
+- ✅ MappingManager.vue（轮次表 + 4 个新弹窗 + 内联 TaskTreeNode）—— **第 9 步完成**
+- ⏳ TaskDetail.vue —— **下一步**
 - ⏳ 集成测试
