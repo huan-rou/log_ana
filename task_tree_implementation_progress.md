@@ -18,7 +18,8 @@
 0cf1cff  docs: mark Analysis API step complete
 018057e  feat(core): v5 logging setup + key path logger + 26 unit tests
 f32dca4  feat(frontend): v5 API client methods + smoke test (72 assertions)
-<NEW>     feat(frontend): v5 MappingManager — JSON 树按轮次管理主区块
+e988a35  feat(frontend): v5 MappingManager — JSON 树按轮次管理主区块
+<NEW>     feat(frontend): v5 TaskDetail — JSON 树视图（单轮次/整体）
 ```
 
 ### 已落地的代码
@@ -191,19 +192,29 @@ $ D:\log_analyzer\backend\.venv\Scripts\python.exe -m pytest tests/
 - vite build 验证：`MappingManager-BJ087RPb.js` + `MappingManager-DqVB3HnU.css` 输出正常
 - 样式 token 全部走 CSS 变量（`--space-*` / `--text-*` / `--color-*` / `--bg-*`），与全站统一
 
-### 第 10 步 — TaskDetail.vue
-- 路径：`frontend/src/views/TaskDetail.vue`
-- 改造：在 `分析详情` Tab 内加 "单轮次" / "整体" 内嵌 Tab
-- 单轮次 Tab：
-  - 顶部轮次选择器（默认 = 当前 Task 所在 round）
-  - 左树右表布局
-  - 右表 = TestCase 行（按 LogFile.testcase_name 分组），每行带 suite 信息
-- 整体 Tab：
-  - 顶部缺失告警条（"X 个节点在 Y 个 round 存在日志缺失"）
-  - 左树 = round=1 树 + 节点元信息（已执行 N 次 / 最新轮次 M / 缺失告警）
-  - 右表 = 跨 round 聚合的 TestCase 行（含 name_key 聚合维度）
-- 现有 `分析结果 / 原始日志 / 日志浏览 / 失败事件` Tab 保留；只改造"分析详情"
-- 老任务兼容：`Task.tree_node_id IS NULL` 时显示"未关联 JSON 树"提示
+### 第 10 步 — TaskDetail.vue ✅
+- 路径：`frontend/src/views/TaskDetail.vue`（+736 行）
+- **改造**：在「分析详情」AppSection 顶部新增顶级 Tab「JSON 树视图」，含 2 个内嵌 Tab [单轮次 / 整体]
+- **现有 4 个 Tab 完全不动**（分析结果 / 原始日志 / 日志浏览 / 失败事件）
+- **老任务兼容**：`task.tree_node_id IS NULL` 时显示空态 + 「前往任务映射管理」按钮
+- **新顶级 Tab：JSON 树视图**
+  - 单轮次 Tab：
+    - 顶部：轮次选择器（默认 = task 所在 round，通过 `getTaskTree(taskId, null)` 让后端推）+ 节点/叶子/备注 tag
+    - 左：TaskTreeNodeView 递归渲染，左树节点可点击 highlight
+    - 右：当前 task 的 TestCase 行表（失败数 / 日志文件 / 审核状态 / 日志·审核操作）
+  - 整体 Tab：
+    - 顶部缺失告警条：`X 个轮次存在日志缺失`（执行 N 次 / 最新轮次 M / 缺失列表）
+    - 工具栏：聚合基准 = Round #1
+    - 左：Round #1 树（带聚合元信息 tag：执行 N/M + 缺 X/Y/Z），点击叶子节点触发聚合
+    - 右：选中节点的 4 列统计（已执行次数 / 最新轮次 / 最新轮日志数 / 缺失轮次数）+ 跨 round 聚合 TestCase 行表（执行次数 / 已执行轮次 chips / 缺失轮次 chips / 最新轮次 / 审核状态 / 最新日志跳转）
+- **新增组件 TaskTreeNodeView**（脚本内 inline plain object）：递归自引用，支持选中态 + 聚合 tag badge
+- **API 集成**：9 个 `analysisApi.*` 调用（getTaskTrees / getTaskTree / getTestcases / getAggregate / getAggregateTestcases）
+- **响应式联动**：`watch(() => task.value?.tree_node_id)` — task 数据刷新时若在 tree tab 自动重载
+- **Tab 切换缓存**：`treeViewLoaded` 标记首次加载后保留数据，重复切回不重拉
+- **grid 布局**：左树 32% / 右表 68%，`min-height: 540px`，`max-height: 500px` 表格滚动
+- **样式 token 统一**：全部走 `--space-*` / `--text-*` / `--color-*` / `--bg-*` / `--radius-*`，与全站一致
+- **selected 态**：选中节点蓝色背景 + 白字 + 反色 tag
+- **验证**：vite build EXIT=0；backend 94 测试仍全过；frontend API 72 断言仍全过
 
 ### 第 11 步 — 集成测试
 - 路径：`backend/tests/test_task_tree_api.py`（新建）
@@ -282,6 +293,6 @@ npm run dev
 - ✅ Analysis API（5 个端点 + suite 匹配 + 11 个集成测试全过）
 - ✅ 日志设施（`logging_setup.py` + `app_debug_logging` + 17 单测 + 9 关键路径验证）
 - ✅ 前端 API 客户端（mappingApi +8 / analysisApi +5 + analysis.files 扩展 + 72 烟雾断言）
-- ✅ MappingManager.vue（轮次表 + 4 个新弹窗 + 内联 TaskTreeNode）—— **第 9 步完成**
-- ⏳ TaskDetail.vue —— **下一步**
-- ⏳ 集成测试
+- ✅ MappingManager.vue（轮次表 + 4 个新弹窗 + 内联 TaskTreeNode）
+- ✅ TaskDetail.vue（JSON 树视图 Tab + 单轮次/整体 内嵌 Tab + 老任务空态 + 内联 TaskTreeNodeView）—— **第 10 步完成**
+- ⏳ 集成测试 —— **下一步**
