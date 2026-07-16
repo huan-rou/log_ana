@@ -30,6 +30,9 @@ from app.database import Base, async_session  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.user import User, UserRole  # noqa: E402
 from app.models.mapping import TestVersion  # noqa: E402
+from app.models.mapping import TestPurpose, TaskReference  # noqa: E402
+from app.models.task import AnalysisResult, AnalysisRule, Category, FailureEvent, LogFile, Task  # noqa: E402
+from app.models.rule import Rule, RuleStatus  # noqa: E402
 from app.auth import require_admin, hash_password  # noqa: E402
 
 
@@ -344,6 +347,99 @@ async def test_delete_tree_clears_task_links(client, version, db_session):
 async def test_delete_nonexistent_round_404(client, version):
     resp = await client.delete(f"/api/mapping/versions/{version.id}/trees/999")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_current_reports_use_completed_tasks_and_reviewable_files(
+    client, version, db_session, admin_user, monkeypatch, tmp_path,
+):
+    """Version and purpose reports use current completed-task data only."""
+    category = Category(name="Network")
+    purpose = TestPurpose(version_id=version.id, name="Smoke")
+    rule = AnalysisRule(
+        rule_id="network_rule", name="Network rule", category_id=category.id,
+        enabled=True, script_module="rules.network_rule",
+    )
+    db_session.add_all([category, purpose])
+    await db_session.flush()
+    rule.category_id = category.id
+    db_session.add(rule)
+    await db_session.flush()
+    draft_rule = AnalysisRule(
+        rule_id="draft_metadata_rule", name="Original Name", category_id=category.id,
+        enabled=True, script_module="rules.user.draft_metadata_rule",
+    )
+    db_session.add(draft_rule)
+    await db_session.flush()
+    db_session.add(Rule(
+        rule_id=draft_rule.rule_id,
+        status=RuleStatus.draft.value,
+        created_by=admin_user.id,
+        analysis_rule_id=draft_rule.id,
+    ))
+    db_session.add(TaskReference(purpose_id=purpose.id, task_id="automation-1"))
+
+    completed = Task(
+        name="completed", status="completed", source_type="s3",
+        package_version=version.version_name, automation_task_id="automation-1",
+    )
+    ignored = Task(
+        name="still-running", status="parsing", source_type="s3",
+        package_version=version.version_name, automation_task_id="automation-1",
+    )
+    db_session.add_all([completed, ignored])
+    await db_session.flush()
+
+    logfile = LogFile(
+        task_id=completed.id, name="case.html", file_path="case.html",
+        file_type="testcase", failure_count=1, review_status="confirmed",
+    )
+    db_session.add(logfile)
+    await db_session.flush()
+    failure = FailureEvent(task_id=completed.id, log_file_id=logfile.id)
+    db_session.add(failure)
+    await db_session.flush()
+    db_session.add(AnalysisResult(
+        failure_event_id=failure.id, log_file_id=logfile.id, rank=1,
+        category_id=category.id, rule_id=rule.id, confidence=0.9,
+    ))
+    await db_session.commit()
+
+    import app.core.audit_logger as audit_module
+    from app.core.audit_logger import AuditLogger, REPORT_AUDIT_SCHEMA
+    audit_logger = AuditLogger(str(tmp_path / "audit"))
+    await audit_logger.pipeline_start(completed.id, report_audit_schema=REPORT_AUDIT_SCHEMA)
+    await audit_logger.rule_evaluate(completed.id, rule_id="network_rule", matched=True)
+    await audit_logger.rule_evaluate(completed.id, rule_id="network_rule", matched=False)
+    monkeypatch.setattr(audit_module, "audit_logger", audit_logger)
+
+    version_response = await client.get(f"/api/reports/versions/{version.id}")
+    assert version_response.status_code == 200
+    data = version_response.json()
+    assert data["tasks"]["total"] == 1
+    assert data["analysis"]["subjects"] == 1
+    assert data["analysis"]["completed"] == 1
+    assert data["analysis"]["rule_result"] == 1
+    assert data["review"] == {"eligible": 1, "pending": 0, "confirmed": 1, "overridden": 0}
+    assert data["tool_effectiveness"] == {
+        "total_files": 1, "analyzed_files": 1, "analysis_rate": 100.0,
+        "reviewed_files": 1, "adopted_files": 1, "adoption_rate": 100.0,
+    }
+    assert data["categories"] == [{"name": "Network", "count": 1}]
+    assert data["rule_audit_status"]["available"] is True
+    assert data["rule_statistics"] == [{
+        "rule_id": "network_rule", "name": "Network rule", "category": "Network",
+        "selected_count": 1, "selected_rate": 100.0,
+        "evaluation_count": 2, "matched_count": 1, "match_rate": 50.0,
+        "error_count": 0,
+    }]
+    assert data["purposes"][0]["name"] == "Smoke"
+    assert data["purposes"][0]["task_count"] == 1
+
+    purpose_response = await client.get(f"/api/reports/purposes/{purpose.id}")
+    assert purpose_response.status_code == 200
+    assert purpose_response.json()["scope"]["type"] == "purpose"
+    assert purpose_response.json()["analysis"]["completed"] == 1
 
 
 # ── create_tasks ──

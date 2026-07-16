@@ -438,7 +438,7 @@ async def _run_pipeline(task_id: str):
     from app.services.log_parser import parse_log_file
     from app.services.failure_detector import detect_failures
     from app.services.rule_executor import classify_failures
-    from app.core.audit_logger import audit_logger
+    from app.core.audit_logger import REPORT_AUDIT_SCHEMA, audit_logger
 
     import time as _time
     t0 = _time.monotonic()
@@ -449,10 +449,12 @@ async def _run_pipeline(task_id: str):
         if not task:
             return
 
+        await audit_logger.reset_task(task_id)
         await audit_logger.pipeline_start(
             task_id,
             source_type=task.source_type,
             parser_type=task.parser_type,
+            report_audit_schema=REPORT_AUDIT_SCHEMA,
         )
 
         try:
@@ -954,9 +956,9 @@ async def get_report(
     Returns:
         - total_testsuite_files: 测试套 .html 文件总数
         - total_testcase_files: 测试用例 .html 文件总数
-        - total_auto_analyzed: 自动分析过的文件数（有 failure 的）
-        - auto_analyzed_pct: 自动分析占比
-        - human_reviewed: 已人工审核的文件数（confirmed + overridden）
+        - total_auto_analyzed: 有主结论的失败文件数
+        - auto_analyzed_pct: 有主结论 / 有失败文件
+        - human_reviewed: 已人工审核的失败文件数（confirmed + overridden）
         - human_overridden: 人工覆盖的文件数
         - remaining_unreviewed: 尚未审核的文件数（仍有 failure 且 pending）
     """
@@ -967,21 +969,30 @@ async def get_report(
     if not task:
         raise HTTPException(404, "Task not found")
 
-    rows = (await db.execute(
-        select(LogFile.file_type, LogFile.review_status, LogFile.failure_count)
-        .where(LogFile.task_id == task_id)
-    )).all()
+    files = (await db.execute(
+        select(LogFile).where(LogFile.task_id == task_id)
+    )).scalars().all()
+    file_ids = [item.id for item in files]
+    primary_file_ids = set()
+    if file_ids:
+        primary_file_ids = set((await db.execute(
+            select(AnalysisResult.log_file_id).where(
+                AnalysisResult.log_file_id.in_(file_ids),
+                AnalysisResult.rank == 1,
+            )
+        )).scalars().all())
 
-    testsuite_total = sum(1 for ft, _, _ in rows if ft == "testsuite")
-    testcase_total = sum(1 for ft, _, _ in rows if ft == "testcase")
-    tasklog_total = sum(1 for ft, _, _ in rows if ft == "task_log")
+    testsuite_total = sum(item.file_type == "testsuite" for item in files)
+    testcase_total = sum(item.file_type == "testcase" for item in files)
+    tasklog_total = sum(item.file_type == "task_log" for item in files)
 
-    auto_analyzed = sum(1 for _, _, fc in rows if fc > 0)
-    total_files = len(rows) or 1  # avoid division by zero
+    eligible = [item for item in files if item.failure_count > 0]
+    auto_analyzed = sum(item.id in primary_file_ids for item in eligible)
+    total_files = len(files)
 
-    human_reviewed = sum(1 for _, rs, _ in rows if rs in ("confirmed", "overridden"))
-    human_overridden = sum(1 for _, rs, _ in rows if rs == "overridden")
-    remaining_unreviewed = sum(1 for _, rs, fc in rows if rs == "pending" and fc > 0)
+    human_reviewed = sum(item.review_status in ("confirmed", "overridden") for item in eligible)
+    human_overridden = sum(item.review_status == "overridden" for item in eligible)
+    remaining_unreviewed = sum(item.review_status == "pending" for item in eligible)
 
     return {
         "task_id": task_id,
@@ -991,7 +1002,7 @@ async def get_report(
         "total_tasklog_files": tasklog_total,
         "total_files": total_files,
         "auto_analyzed": auto_analyzed,
-        "auto_analyzed_pct": round(auto_analyzed / total_files * 100, 1) if total_files > 0 else 0,
+        "auto_analyzed_pct": round(auto_analyzed / len(eligible) * 100, 1) if eligible else 0,
         "human_reviewed": human_reviewed,
         "human_overridden": human_overridden,
         "remaining_unreviewed": remaining_unreviewed,
@@ -1187,4 +1198,3 @@ async def list_testcases_for_task(
     """单轮次视图右表：当前 Task 下 file_type=testcase 的 LogFile，按 testcase_name 分组。"""
     task = await _get_task_or_404(db, task_id)
     return await _list_testcases_in_round(db, task_id, tree_node_id)
-

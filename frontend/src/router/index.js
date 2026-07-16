@@ -38,6 +38,12 @@ const routes = [
     meta: { title: '审核看板', breadcrumb: '审核' },
   },
   {
+    path: '/reports',
+    name: 'OverallReport',
+    component: () => import('@/views/OverallReport.vue'),
+    meta: { title: '整体报表', breadcrumb: '整体报表' },
+  },
+  {
     path: '/users',
     name: 'UserManager',
     component: () => import('@/views/UserManager.vue'),

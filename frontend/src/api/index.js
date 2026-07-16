@@ -244,3 +244,8 @@ export const mappingApi = {
     return api.put(`/mapping/versions/${versionId}/trees/${round}/note`, { note })
   },
 }
+
+export const reportApi = {
+  version: (versionId) => api.get(`/reports/versions/${versionId}`),
+  purpose: (purposeId) => api.get(`/reports/purposes/${purposeId}`),
+}
