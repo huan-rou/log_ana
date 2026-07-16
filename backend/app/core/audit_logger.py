@@ -17,6 +17,9 @@ from pathlib import Path
 from typing import Optional
 
 
+REPORT_AUDIT_SCHEMA = 1
+
+
 class AuditLogger:
     """独立审计日志记录器。
 
@@ -57,6 +60,17 @@ class AuditLogger:
                     f.write(line + "\n")
             except Exception:
                 pass  # audit log must never crash the pipeline
+
+    async def reset_task(self, task_id: str) -> None:
+        """Discard the previous run before starting a new analysis pipeline."""
+        if not self._enabled:
+            return
+        lock = self._get_lock(task_id)
+        async with lock:
+            try:
+                (self._dir / f"{task_id}.audit.jsonl").unlink(missing_ok=True)
+            except Exception:
+                pass
 
     # ── Pipeline lifecycle ──
 
@@ -162,6 +176,61 @@ class AuditLogger:
         except Exception:
             pass
         return count
+
+    def collect_rule_statistics(self, task_ids: list[str]) -> dict:
+        """Stream current-run rule evaluations for a report scope.
+
+        Only logs carrying the current report schema are usable. Older audit files
+        may contain several re-analysis runs, so reporting them would over-count.
+        """
+        rules: dict[str, dict] = {}
+        unavailable = 0
+
+        for task_id in task_ids:
+            filepath = self._dir / f"{task_id}.audit.jsonl"
+            marked = False
+            if not filepath.exists():
+                unavailable += 1
+                continue
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            event = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if (
+                            event.get("type") == "pipeline.start"
+                            and event.get("report_audit_schema") == REPORT_AUDIT_SCHEMA
+                        ):
+                            marked = True
+                            continue
+                        if not marked or event.get("type") != "rule.evaluate":
+                            continue
+                        rule_id = str(event.get("rule_id") or "")
+                        if not rule_id:
+                            continue
+                        counters = rules.setdefault(
+                            rule_id,
+                            {"evaluations": 0, "matches": 0, "errors": 0},
+                        )
+                        counters["evaluations"] += 1
+                        if event.get("matched"):
+                            counters["matches"] += 1
+                        if event.get("error"):
+                            counters["errors"] += 1
+            except Exception:
+                unavailable += 1
+                continue
+            if not marked:
+                unavailable += 1
+
+        return {
+            "available": unavailable == 0,
+            "available_task_count": len(task_ids) - unavailable,
+            "unavailable_task_count": unavailable,
+            "rules": rules,
+        }
 
 
 # ── 全局单例 ──

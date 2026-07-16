@@ -1,8 +1,11 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { taskApi, browseApi } from '@/api'
-import { ElMessageBox } from 'element-plus'
+import { taskApi, browseApi, analysisApi } from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  VideoPlay, CircleCheck, Warning, Refresh, ArrowDown,
+} from '@element-plus/icons-vue'
 import AppPageHeader from '@/components/layout/AppPageHeader.vue'
 import AppSection from '@/components/layout/AppSection.vue'
 
@@ -135,6 +138,150 @@ function openTask(task) {
   router.push(`/tasks/${task.id}`)
 }
 
+// ════════════════════════════════════════════════════════════════
+// 批量启动 / 重分析（v6）
+// ════════════════════════════════════════════════════════════════
+
+const tableRef = ref(null)
+const selectedTaskIds = ref([])  // 当前勾选的 task id 集合
+const selectedRows = ref([])     // 完整行对象（用于细分按 status 启动/重分析）
+
+const batchSubmitting = ref(false)
+const batchResultVisible = ref(false)
+const batchResult = ref(null)
+const batchResultAction = ref('start')  // 'start' | 'rerun' — 决定结果 dialog 标题
+
+// 表格里能勾的任务状态：pending / failed / completed 都是合法入口
+//   pending + failed → 启动分析；completed + failed → 重新分析
+// 其他状态（parsing / analyzing / fetched）正忙，不能批量触发。
+function isActionable(task) {
+  return task && ['pending', 'failed', 'completed'].includes(task.status)
+}
+
+function isStartable(task) {
+  return task && (task.status === 'pending' || task.status === 'failed')
+}
+
+function isRerunable(task) {
+  return task && (task.status === 'completed' || task.status === 'failed')
+}
+
+const startableCount = computed(() => tasks.value.filter(isStartable).length)
+const rerunableCount = computed(() => tasks.value.filter(isRerunable).length)
+
+function onSelectionChange(rows) {
+  selectedRows.value = rows
+  // 只保留可操作的（防 race：清空当前页面外的 selection 残留）
+  selectedTaskIds.value = rows.filter(isActionable).map((r) => r.id)
+}
+
+function selectAllStartable() {
+  if (!tableRef.value) return
+  const rows = tasks.value.filter(isStartable)
+  rows.forEach((row) => {
+    tableRef.value.toggleRowSelection(row, true)
+  })
+  ElMessage.success(`已选中 ${rows.length} 个可启动任务`)
+}
+
+function selectAllRerunable() {
+  if (!tableRef.value) return
+  const rows = tasks.value.filter(isRerunable)
+  rows.forEach((row) => {
+    tableRef.value.toggleRowSelection(row, true)
+  })
+  ElMessage.success(`已选中 ${rows.length} 个可重分析任务`)
+}
+
+function clearSelection() {
+  if (!tableRef.value) return
+  tableRef.value.clearSelection()
+  selectedTaskIds.value = []
+}
+
+async function handleBatchRun() {
+  const targets = selectedRows.value.filter(isStartable)
+  if (targets.length === 0) {
+    ElMessage.warning('当前选择中没有可启动的任务（仅 pending/failed 可启动）')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将启动 ${targets.length} 个任务的日志解析与分析。\n` +
+      `已完成的或正在运行的会被自动跳过。\n\n继续？`,
+      '批量启动分析',
+      { type: 'info', confirmButtonText: '启动', cancelButtonText: '取消' },
+    )
+  } catch { return }
+
+  batchSubmitting.value = true
+  try {
+    const { data } = await analysisApi.runBatch(targets.map((t) => t.id))
+    batchResult.value = data
+    batchResultAction.value = 'start'
+    batchResultVisible.value = true
+    const started = data.started?.length || 0
+    const skipped = data.skipped?.length || 0
+    const errors = data.errors?.length || 0
+    if (errors > 0) {
+      ElMessage.warning(`启动 ${started} 个，${skipped} 跳过，${errors} 个任务不存在`)
+    } else if (skipped > 0) {
+      ElMessage.success(`启动 ${started} 个，${skipped} 个已跳过（状态不允许重复启动）`)
+    } else {
+      ElMessage.success(`已启动 ${started} 个任务`)
+    }
+    await loadTasks()
+    clearSelection()
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
+async function handleBatchRerun() {
+  const targets = selectedRows.value.filter(isRerunable)
+  if (targets.length === 0) {
+    ElMessage.warning('当前选择中没有可重分析的任务（仅 completed/failed 可重新分析）')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `将清空 ${targets.length} 个任务的现有日志条目 / 失败事件 / 分析结果 / 反馈，\n` +
+      `然后重新跑完整分析流水线（应用最新解析 / 检测 / 规则代码）。\n\n` +
+      `默认会重置所有任务的人工审核结论（如需保留，可在 TaskDetail 详情页单任务模式勾选）。\n\n` +
+      `此操作不可逆，是否继续？`,
+      '批量重新分析',
+      {
+        type: 'warning',
+        confirmButtonText: '重分析',
+        cancelButtonText: '取消',
+        confirmButtonClass: 'el-button--warning',
+      },
+    )
+  } catch { return }
+
+  batchSubmitting.value = true
+  try {
+    const { data } = await analysisApi.rerunBatch(targets.map((t) => t.id))
+    batchResult.value = data
+    batchResultAction.value = 'rerun'
+    batchResultVisible.value = true
+    const started = data.started?.length || 0
+    const skipped = data.skipped?.length || 0
+    const errors = data.errors?.length || 0
+    if (errors > 0) {
+      ElMessage.warning(`重分析 ${started} 个，${skipped} 跳过，${errors} 个任务不存在`)
+    } else if (skipped > 0) {
+      ElMessage.success(`重分析 ${started} 个，${skipped} 个已跳过（状态不允许重分析）`)
+    } else {
+      ElMessage.success(`已对 ${started} 个任务启动重新分析`)
+    }
+    await loadTasks()
+    clearSelection()
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
 onMounted(loadTasks)
 </script>
 
@@ -154,15 +301,96 @@ onMounted(loadTasks)
         >
           <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
         </el-select>
-        <el-button type="primary" @click="showCreate = true">
+        <el-dropdown
+          trigger="click"
+          :disabled="selectedTaskIds.length === 0"
+          @command="(cmd) => cmd === 'start' ? handleBatchRun() : handleBatchRerun()"
+        >
+          <el-button
+            type="success"
+            :loading="batchSubmitting"
+            :disabled="selectedTaskIds.length === 0"
+          >
+            <el-icon><VideoPlay /></el-icon>
+            批量操作
+            <el-badge
+              v-if="selectedTaskIds.length > 0"
+              :value="selectedTaskIds.length"
+              :max="99"
+              type="warning"
+              class="batch-badge"
+            />
+            <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="start" :disabled="selectedRows.filter(isStartable).length === 0">
+                <el-icon><VideoPlay /></el-icon>
+                启动分析（<strong>{{ selectedRows.filter(isStartable).length }}</strong>）
+              </el-dropdown-item>
+              <el-dropdown-item command="rerun" :disabled="selectedRows.filter(isRerunable).length === 0">
+                <el-icon><Refresh /></el-icon>
+                重新分析（<strong>{{ selectedRows.filter(isRerunable).length }}</strong>）
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+        <el-button @click="showCreate = true">
           <el-icon><Plus /></el-icon>
           新建任务
         </el-button>
       </template>
     </AppPageHeader>
 
-    <AppSection title="任务" :hint="`共 ${total} 条`">
-      <el-table :data="tasks" v-loading="loading" stripe class="data-table">
+    <AppSection
+      title="任务"
+      :hint="`共 ${total} 条 / 可启动 ${startableCount} / 可重分析 ${rerunableCount}`"
+    >
+      <div class="batch-bar" v-if="startableCount + rerunableCount > 0 || selectedTaskIds.length > 0">
+        <el-tooltip content="勾选所有 pending / failed（可启动分析）" placement="top">
+          <el-button size="small" @click="selectAllStartable">
+            <el-icon><CircleCheck /></el-icon>
+            全选可启动（{{ startableCount }}）
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="勾选所有 completed / failed（可重新分析）" placement="top">
+          <el-button size="small" type="warning" plain @click="selectAllRerunable">
+            <el-icon><Refresh /></el-icon>
+            全选可重分析（{{ rerunableCount }}）
+          </el-button>
+        </el-tooltip>
+        <el-button
+          size="small"
+          type="info"
+          plain
+          :disabled="selectedTaskIds.length === 0"
+          @click="clearSelection"
+        >
+          清空选择
+        </el-button>
+        <span class="batch-hint">
+          当前已选 <strong>{{ selectedTaskIds.length }}</strong> 个任务
+          <template v-if="selectedTaskIds.length > 0">
+            （可启动 <strong>{{ selectedRows.filter(isStartable).length }}</strong>
+            / 可重分析 <strong>{{ selectedRows.filter(isRerunable).length }}</strong>）
+          </template>
+        </span>
+      </div>
+      <el-table
+        ref="tableRef"
+        :data="tasks"
+        v-loading="loading"
+        stripe
+        class="data-table"
+        row-key="id"
+        @selection-change="onSelectionChange"
+      >
+        <el-table-column
+          type="selection"
+          width="44"
+          :selectable="(row) => isActionable(row)"
+          reserve-selection
+        />
         <el-table-column label="任务名称" min-width="220">
           <template #header>
             <el-tooltip content="点击任务名进入详情页" placement="top">
@@ -238,6 +466,121 @@ onMounted(loadTasks)
         </el-table-column>
       </el-table>
     </AppSection>
+
+    <!-- Batch run / rerun result dialog -->
+    <el-dialog
+      v-model="batchResultVisible"
+      :title="
+        batchResult
+          ? (batchResultAction === 'rerun'
+              ? `批量重新分析结果 — 共 ${batchResult.total} 个`
+              : `批量启动结果 — 共 ${batchResult.total} 个`)
+          : '批量操作结果'
+      "
+      width="640px"
+    >
+      <template v-if="batchResult">
+        <el-row :gutter="12" style="margin-bottom: 16px">
+          <el-col :span="8">
+            <div class="s-stat">
+              <span class="s-num success">{{ batchResult.started?.length || 0 }}</span>
+              <span class="s-label">
+                {{ batchResultAction === 'rerun' ? '已重新分析' : '已启动' }}
+              </span>
+            </div>
+          </el-col>
+          <el-col :span="8">
+            <div class="s-stat">
+              <span class="s-num warning">{{ batchResult.skipped?.length || 0 }}</span>
+              <span class="s-label">已跳过</span>
+            </div>
+          </el-col>
+          <el-col :span="8">
+            <div class="s-stat">
+              <span class="s-num danger">{{ batchResult.errors?.length || 0 }}</span>
+              <span class="s-label">失败（task 不存在）</span>
+            </div>
+          </el-col>
+        </el-row>
+
+        <template v-if="batchResult.skipped?.length">
+          <h4 class="result-section-title">
+            <el-icon><Warning /></el-icon>
+            跳过的任务（状态不允许{{ batchResultAction === 'rerun' ? '重分析' : '重复启动' }}）
+          </h4>
+          <div class="skipped-tags">
+            <el-tag
+              v-for="item in batchResult.skipped"
+              :key="item.task_id"
+              size="small"
+              type="warning"
+              style="margin: 2px"
+            >
+              {{ item.name }}（{{ item.status }}）
+            </el-tag>
+          </div>
+        </template>
+
+        <template v-if="batchResult.errors?.length">
+          <h4 class="result-section-title">
+            <el-icon><Warning /></el-icon> 出错的 task_id
+          </h4>
+          <el-table :data="batchResult.errors" size="small" max-height="180">
+            <el-table-column prop="task_id" label="Task ID" min-width="180" />
+            <el-table-column prop="reason" label="原因" min-width="160" />
+          </el-table>
+        </template>
+
+        <template v-if="batchResultAction === 'rerun' && batchResult.deleted?.length">
+          <h4 class="result-section-title">各任务清理数据明细</h4>
+          <el-table :data="batchResult.deleted" size="small" max-height="240">
+            <el-table-column prop="name" label="任务名" min-width="180" show-overflow-tooltip />
+            <el-table-column label="日志条目" width="80" align="center">
+              <template #default="{ row }">
+                {{ row.deleted?.log_entries ?? 0 }}
+              </template>
+            </el-table-column>
+            <el-table-column label="失败事件" width="80" align="center">
+              <template #default="{ row }">
+                {{ row.deleted?.failure_events ?? 0 }}
+              </template>
+            </el-table-column>
+            <el-table-column label="分析结果" width="80" align="center">
+              <template #default="{ row }">
+                {{ row.deleted?.analysis_results ?? 0 }}
+              </template>
+            </el-table-column>
+            <el-table-column label="反馈" width="60" align="center">
+              <template #default="{ row }">
+                {{ row.deleted?.feedback ?? 0 }}
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+
+        <template
+          v-if="!batchResult.skipped?.length && !batchResult.errors?.length && batchResultAction === 'start'"
+        >
+          <el-alert
+            :title="`全部 ${batchResult.total} 个任务已成功启动后台分析`"
+            type="success"
+            :closable="false"
+          />
+        </template>
+        <template
+          v-if="!batchResult.skipped?.length && !batchResult.errors?.length && batchResultAction === 'rerun'"
+        >
+          <el-alert
+            :title="`全部 ${batchResult.total} 个任务已成功启动重新分析（清旧数据 + 重跑）`"
+            type="success"
+            :closable="false"
+          />
+        </template>
+      </template>
+      <template #footer>
+        <el-button type="primary" @click="batchResultVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Create Dialog -->
     <el-dialog v-model="showCreate" title="新建分析任务" width="520px" top="8vh">
@@ -369,5 +712,63 @@ onMounted(loadTasks)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ── 批量启动 ── */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  flex-wrap: wrap;
+}
+.batch-hint {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+}
+.batch-badge {
+  margin-left: 4px;
+}
+.batch-badge :deep(.el-badge__content) {
+  transform: translateY(-2px);
+}
+
+.s-stat {
+  text-align: center;
+  padding: var(--space-md) var(--space-xs);
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
+}
+.s-num {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.s-label {
+  display: block;
+  font-size: var(--text-tiny);
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+.s-num.success { color: var(--color-success); }
+.s-num.warning { color: var(--color-warning); }
+.s-num.danger  { color: var(--color-error); }
+
+.skipped-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.result-section-title {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  margin: var(--space-md) 0 var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 </style>

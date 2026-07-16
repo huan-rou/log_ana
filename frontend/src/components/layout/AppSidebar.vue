@@ -43,11 +43,13 @@ const navItems = [
 const adminNavItems = [
   { path: '/users',   label: '用户', icon: 'User' },
   { path: '/mapping', label: '映射', icon: 'Connection' },
+  { path: '/reports', label: '整体报表', icon: 'DataBoard' },
 ]
 
 const activePath = computed(() => {
   const p = route.path
   if (p.startsWith('/review')) return '/review'
+  if (p.startsWith('/reports')) return '/reports'
   if (p.startsWith('/tasks'))  return '/tasks'
   if (p.startsWith('/browse')) return '/browse'
   if (p.startsWith('/rules'))  return '/rules/editor'

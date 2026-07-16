@@ -372,6 +372,29 @@ async def init_db():
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    # 手动 ALTER TABLE 兜底老库的字段补齐
+    await _apply_manual_migrations()
+
+
+async def _apply_manual_migrations() -> None:
+    """对 SQLite 老库做字段补齐（create_all 不会改已有表结构）。"""
+    from sqlalchemy import text
+
+    statements = [
+        # v5: tasks.tree_node_id
+        "ALTER TABLE tasks ADD COLUMN tree_node_id VARCHAR(12)",
+    ]
+    async with engine.begin() as conn:
+        for stmt in statements:
+            try:
+                await conn.execute(text(stmt))
+                logger.warning("[migration] applied: %s", stmt)
+            except Exception as exc:
+                # 列已存在时会报错，吞掉
+                msg = str(exc).lower()
+                if "duplicate column" in msg or "already exists" in msg:
+                    continue
+                logger.warning("[migration] skipped %s (%s)", stmt, exc)
 
 
 DEFAULT_CATEGORY_TREE = {

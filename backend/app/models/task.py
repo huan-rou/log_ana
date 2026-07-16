@@ -83,6 +83,12 @@ class Task(Base):
     unrecognized_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[Optional[str]] = mapped_column(Text, default=None)
 
+    # ── 任务树关联（v5）──
+    # 指向 TestTaskNode.id（叶子节点）；NULL = 未关联或老任务
+    tree_node_id: Mapped[Optional[str]] = mapped_column(
+        String(12), ForeignKey("test_task_nodes.id"), default=None, index=True
+    )
+
     # ── 时间 ──
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=None)

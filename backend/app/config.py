@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     audit_enabled: bool = True
     audit_dir: Path = Path("./data/audit")
 
+    # App debug logging (v5 新增)
+    # 默认开启：发布时设 LA_APP_DEBUG_LOGGING=false 关闭所有 INFO/DEBUG
+    app_debug_logging: bool = True
+    log_file: Path = Path("./data/app.log")
+
     # Auth
     jwt_secret: str = "log-analyzer-secret-change-in-production"
 
@@ -77,6 +82,7 @@ class Settings(BaseSettings):
         self.workspace_dir = _resolve_backend_path(self.workspace_dir)
         self.rules_dir = _resolve_backend_path(self.rules_dir)
         self.audit_dir = _resolve_backend_path(self.audit_dir)
+        self.log_file = _resolve_backend_path(self.log_file)
         self.db_diagnostics_log_file = _resolve_backend_path(self.db_diagnostics_log_file)
 
 

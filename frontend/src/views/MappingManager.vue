@@ -1,9 +1,18 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import api from '@/api'
+import {
+  Plus, Search, View, Edit, Delete, Connection,
+  Document, Refresh, FolderAdd, CircleClose, Warning,
+} from '@element-plus/icons-vue'
+import api, { mappingApi } from '@/api'
 import AppPageHeader from '@/components/layout/AppPageHeader.vue'
 import AppSection from '@/components/layout/AppSection.vue'
+import TaskTreeNode from '@/components/TaskTreeNode.vue'
+
+// ════════════════════════════════════════════════════════════════
+// 共享：版本 + 原有测试目的逻辑（保留 legacy）
+// ════════════════════════════════════════════════════════════════
 
 const versions = ref([])
 const selectedVersionId = ref(null)
@@ -11,27 +20,28 @@ const purposes = ref([])
 const loading = ref(false)
 const purposesLoading = ref(false)
 
-// ── Version dialog ──
 const versionDialogVisible = ref(false)
 const versionForm = ref({ version_name: '' })
 
-// ── Purpose dialog ──
 const purposeDialogVisible = ref(false)
 const purposeDialogTitle = ref('创建测试目的')
 const isEditPurpose = ref(false)
 const editPurposeId = ref(null)
 const purposeForm = ref({ name: '', description: '', environment: '', taskRefsText: '' })
 
-// ── Discovered tasks ──
 const discoveredTaskIds = ref([])
 const discovering = ref(false)
 const discoveredVersionId = ref(null)
 const discoveredError = ref(null)
 
-// ── Stats dialog ──
 const statsDialogVisible = ref(false)
 const statsData = ref(null)
 const statsLoading = ref(false)
+
+const taskDialogVisible = ref(false)
+const taskPurposeName = ref('')
+const taskPurposeId = ref(null)
+const taskCreating = ref(false)
 
 onMounted(loadVersions)
 
@@ -42,7 +52,7 @@ const selectedVersion = computed(() =>
 async function loadVersions() {
   loading.value = true
   try {
-    const { data } = await api.get('/mapping/versions')
+    const { data } = await mappingApi.listVersions()
     versions.value = data
     if (data.length > 0 && !selectedVersionId.value) {
       selectedVersionId.value = data[0].id
@@ -57,9 +67,7 @@ async function loadPurposes() {
   if (!selectedVersionId.value) return
   purposesLoading.value = true
   try {
-    const { data } = await api.get('/mapping/purposes', {
-      params: { version_id: selectedVersionId.value }
-    })
+    const { data } = await mappingApi.listPurposes(selectedVersionId.value)
     purposes.value = data
   } finally {
     purposesLoading.value = false
@@ -68,10 +76,11 @@ async function loadPurposes() {
 
 function handleVersionChange() {
   purposes.value = []
+  trees.value = []
   loadPurposes()
+  loadTrees()
 }
 
-// ── Version CRUD ──
 function openCreateVersion() {
   versionForm.value = { version_name: '' }
   versionDialogVisible.value = true
@@ -83,14 +92,13 @@ async function handleCreateVersion() {
     return
   }
   try {
-    await api.post('/mapping/versions', versionForm.value)
+    await mappingApi.createVersion(versionForm.value)
     ElMessage.success('版本已创建')
     versionDialogVisible.value = false
     loadVersions()
   } catch {}
 }
 
-// ── S3 Discover ──
 async function handleDiscover() {
   if (!selectedVersionId.value) return
   discovering.value = true
@@ -98,7 +106,7 @@ async function handleDiscover() {
   discoveredError.value = null
   discoveredTaskIds.value = []
   try {
-    const { data } = await api.post(`/mapping/versions/${selectedVersionId.value}/discover`)
+    const { data } = await mappingApi.discoverTasks(selectedVersionId.value)
     discoveredTaskIds.value = data.discovered_task_ids || []
     if (data.error) discoveredError.value = data.error
   } finally {
@@ -106,7 +114,6 @@ async function handleDiscover() {
   }
 }
 
-// ── Purpose CRUD ──
 function openCreatePurpose() {
   isEditPurpose.value = false
   purposeDialogTitle.value = '创建测试目的'
@@ -195,11 +202,6 @@ async function handleStats(purpose) {
   }
 }
 
-const taskDialogVisible = ref(false)
-const taskPurposeName = ref('')
-const taskPurposeId = ref(null)
-const taskCreating = ref(false)
-
 function openCreateTask(purpose) {
   taskPurposeName.value = purpose.name
   taskPurposeId.value = purpose.id
@@ -224,6 +226,218 @@ async function handleCreateTask() {
     taskCreating.value = false
   }
 }
+
+// ════════════════════════════════════════════════════════════════
+// v5：JSON 树（按轮次管理）—— 主要工作区
+// ════════════════════════════════════════════════════════════════
+
+const trees = ref([])
+const treesLoading = ref(false)
+
+// ── 追加轮次对话框 ──
+const appendDialogVisible = ref(false)
+const appendForm = ref({ note: '', jsonText: '' })
+const appendSubmitting = ref(false)
+const previewResult = ref(null)
+const previewing = ref(false)
+
+function openAppendDialog() {
+  appendForm.value = { note: '', jsonText: '' }
+  previewResult.value = null
+  appendDialogVisible.value = true
+}
+
+async function handlePreview() {
+  if (!appendForm.value.jsonText.trim()) {
+    ElMessage.warning('请粘贴 JSON 文本')
+    return
+  }
+  previewing.value = true
+  previewResult.value = null
+  try {
+    const { data } = await mappingApi.previewTree(
+      selectedVersionId.value,
+      appendForm.value.jsonText,
+    )
+    previewResult.value = data
+  } catch {} finally {
+    previewing.value = false
+  }
+}
+
+async function handleAppend({ alsoCreateTasks = false } = {}) {
+  if (!appendForm.value.note.trim()) {
+    ElMessage.warning('请输入轮次备注')
+    return
+  }
+  if (!appendForm.value.jsonText.trim()) {
+    ElMessage.warning('请粘贴 JSON 文本')
+    return
+  }
+  appendSubmitting.value = true
+  try {
+    const { data } = await mappingApi.appendTree(
+      selectedVersionId.value,
+      appendForm.value.jsonText,
+      appendForm.value.note,
+    )
+    ElMessage.success(`已追加轮次 #${data.round_number}（${data.total_nodes} 节点 / ${data.leaf_count} 叶子）`)
+    appendDialogVisible.value = false
+    await loadTrees()
+    if (alsoCreateTasks) {
+      await handleCreateTasksFromTree(data.round_number, { silent: true })
+    }
+  } catch {} finally {
+    appendSubmitting.value = false
+  }
+}
+
+async function handleAutoFetchPlaceholder() {
+  try {
+    const { data } = await mappingApi.autoFetchTree(selectedVersionId.value, 'placeholder-execution-id')
+    // 后端会抛 503，这里兜底
+    ElMessage.warning(data?.message || 'auto-fetch 即将推出')
+  } catch (e) {
+    // axios interceptor 已经弹过错误提示；这里不重复弹
+  }
+}
+
+// ── 加载轮次列表 ──
+async function loadTrees() {
+  if (!selectedVersionId.value) return
+  treesLoading.value = true
+  try {
+    const { data } = await mappingApi.listTrees(selectedVersionId.value)
+    trees.value = data
+  } catch {} finally {
+    treesLoading.value = false
+  }
+}
+
+watch(selectedVersionId, (id) => {
+  if (id) loadTrees()
+})
+
+// ── 查看树对话框 ──
+const viewDialogVisible = ref(false)
+const viewTree = ref(null)
+const viewLoading = ref(false)
+const viewIncludeS3 = ref(true)
+
+async function openViewTree(row) {
+  viewDialogVisible.value = true
+  viewTree.value = null
+  viewLoading.value = true
+  try {
+    const { data } = await mappingApi.getTree(selectedVersionId.value, row.round_number, {
+      includeS3Probe: viewIncludeS3.value,
+    })
+    viewTree.value = data
+  } catch {} finally {
+    viewLoading.value = false
+  }
+}
+
+// 切 S3 探测开关时重新拉
+async function toggleViewS3Probe() {
+  if (viewTree.value) {
+    await openViewTree({ round_number: viewTree.value.round_number })
+  }
+}
+
+// ── 改备注对话框 ──
+const noteDialogVisible = ref(false)
+const noteForm = ref({ round: null, note: '' })
+
+function openEditNote(row) {
+  noteForm.value = { round: row.round_number, note: row.note || '' }
+  noteDialogVisible.value = true
+}
+
+async function handleSaveNote() {
+  if (!noteForm.value.note.trim()) {
+    ElMessage.warning('备注不能为空')
+    return
+  }
+  try {
+    await mappingApi.updateNote(
+      selectedVersionId.value,
+      noteForm.value.round,
+      noteForm.value.note,
+    )
+    ElMessage.success('备注已更新')
+    noteDialogVisible.value = false
+    loadTrees()
+  } catch {}
+}
+
+// ── 批量建任务 ──
+const createTasksResultVisible = ref(false)
+const createTasksResult = ref(null)
+
+async function handleCreateTasksFromTree(roundNumber, { silent = false } = {}) {
+  try {
+    const { data } = await mappingApi.createTasksFromTree(selectedVersionId.value, roundNumber)
+    createTasksResult.value = data
+    const total = (data.created?.length || 0) + (data.linked?.length || 0)
+    if (!silent) {
+      createTasksResultVisible.value = true
+    }
+    ElMessage.success(
+      `轮次 #${roundNumber}：新建 ${data.created?.length || 0} / 关联 ${data.linked?.length || 0} / 跳过 ${data.skipped?.length || 0}（共 ${total}）`
+    )
+    await loadTrees()
+  } catch {}
+}
+
+async function handleDeleteTree(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除轮次 #${row.round_number}（${row.root_name}）吗？\n\n` +
+      `此操作将解除该轮次节点上所有 Task 的 tree_node_id 关联，\n` +
+      `Task 实体保留，节点和树记录被删除。\n\n` +
+      `注意：此操作不可恢复。`,
+      '删除轮次',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+    const { data } = await mappingApi.deleteTree(selectedVersionId.value, row.round_number)
+    ElMessage.success(
+      `轮次 #${row.round_number} 已删除（影响 ${data.affected_task_count} 个 Task）`
+    )
+    loadTrees()
+  } catch { /* cancelled */ }
+}
+
+// ── 工具 ──
+function fmtTime(iso) {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    return d.toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return iso
+  }
+}
+
+const totalLeavesAcrossRounds = computed(() =>
+  trees.value.reduce((sum, t) => sum + (t.leaf_count || 0), 0)
+)
+
+// ── 预览面板：折叠默认展开项 ──
+const previewCollapse = ref(['tree'])
+
+// ── 工具 ──
+function s3MatchedCount(probe) {
+  if (!probe) return 0
+  return Object.values(probe).filter((v) => v === true).length
+}
+function s3MissingCount(probe) {
+  if (!probe) return 0
+  return Object.values(probe).filter((v) => v === false).length
+}
+
+// ── 任务树渲染由独立组件 @/components/TaskTreeNode.vue 处理 ──
+// 这里不再保留 inline 定义
 </script>
 
 <template>
@@ -258,10 +472,78 @@ async function handleCreateTask() {
       </el-col>
 
       <el-col :span="19">
+        <!-- ───── v5 主区块：JSON 树（按轮次管理） ───── -->
+        <AppSection
+          v-if="selectedVersion"
+          :title="`JSON 树（按轮次管理） — ${selectedVersion.version_name}`"
+          :hint="trees.length ? `共 ${trees.length} 个轮次 / ${totalLeavesAcrossRounds} 个叶子` : '点击「追加执行轮次」开始'"
+        >
+          <template #header>
+            <div class="tree-actions">
+              <el-button size="small" @click="loadTrees" :loading="treesLoading">
+                <el-icon><Refresh /></el-icon> 刷新
+              </el-button>
+              <el-button size="small" type="primary" @click="openAppendDialog">
+                <el-icon><Plus /></el-icon> 追加执行轮次
+              </el-button>
+            </div>
+          </template>
+
+          <el-table
+            :data="trees"
+            v-loading="treesLoading"
+            stripe
+            empty-text="暂无轮次，点击右上角「追加执行轮次」开始"
+            class="data-table"
+          >
+            <el-table-column label="轮次" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag type="primary" effect="plain" size="small">#{{ row.round_number }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="root_name" label="根节点" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="root_id" label="根节点 ID" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="num">{{ row.root_id }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="节点 / 叶子" width="110" align="center">
+              <template #default="{ row }">
+                <span class="num">{{ row.total_nodes }}</span>
+                <span class="text-muted"> / </span>
+                <span class="num strong">{{ row.leaf_count }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="note" label="备注" min-width="200" show-overflow-tooltip />
+            <el-table-column label="创建时间" width="170" align="center">
+              <template #default="{ row }">
+                <span class="num">{{ fmtTime(row.created_at) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="320" fixed="right" align="center">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="openViewTree(row)">
+                  <el-icon><View /></el-icon> 查看
+                </el-button>
+                <el-button link type="primary" size="small" @click="openEditNote(row)">
+                  <el-icon><Edit /></el-icon> 备注
+                </el-button>
+                <el-button link type="success" size="small" @click="handleCreateTasksFromTree(row.round_number)">
+                  <el-icon><FolderAdd /></el-icon> 建任务
+                </el-button>
+                <el-button link type="danger" size="small" @click="handleDeleteTree(row)">
+                  <el-icon><Delete /></el-icon> 删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </AppSection>
+
+        <!-- ───── legacy 区块：测试目的 ───── -->
         <AppSection
           v-if="selectedVersion"
           :title="`测试目的 — ${selectedVersion.version_name}`"
-          hint="点击行内按钮进行编辑、统计或创建任务"
+          hint="legacy 管理方式，建议改用上方 JSON 树轮次管理"
         >
           <template #header>
             <div class="purpose-actions">
@@ -273,6 +555,15 @@ async function handleCreateTask() {
               </el-button>
             </div>
           </template>
+
+          <el-alert
+            v-if="trees.length === 0"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 12px"
+          >
+            推荐使用上方「JSON 树（按轮次管理）」：粘贴任务树 JSON → 预览 → 追加 → 按轮次批量建任务。
+          </el-alert>
 
           <div v-if="discoveredVersionId === selectedVersion.id" class="discovered-box">
             <template v-if="discoveredError">
@@ -443,6 +734,237 @@ async function handleCreateTask() {
         <el-button type="primary" :loading="taskCreating" @click="handleCreateTask">确认创建</el-button>
       </template>
     </el-dialog>
+
+    <!-- ═══ v5：追加执行轮次 ═══ -->
+    <el-dialog v-model="appendDialogVisible" title="追加执行轮次" width="780px" :close-on-click-modal="false">
+      <el-form :model="appendForm" label-width="80px">
+        <el-form-item label="轮次备注" required>
+          <el-input
+            v-model="appendForm.note"
+            placeholder="如: 2026-07-07 修复轮次"
+            maxlength="200"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="任务树 JSON">
+          <el-input
+            v-model="appendForm.jsonText"
+            type="textarea"
+            :rows="10"
+            placeholder='粘贴 task_result.json 内容，例如：&#10;{&#10;  "Name": "S1-10G-8S28/R45_B2B_part1",&#10;  "Id": "3806765545196879872",&#10;  "child_tasks": [...]&#10;}'
+            class="json-textarea"
+            spellcheck="false"
+          />
+          <div class="form-hint">
+            顶层必须是对象，节点必填 Id。叶子 = child_tasks 为空数组/缺失/null。
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button @click="handlePreview" :loading="previewing">
+            <el-icon><Document /></el-icon> 解析预览
+          </el-button>
+          <el-button @click="handleAutoFetchPlaceholder">
+            <el-icon><Connection /></el-icon> 按执行 ID 自动获取
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <!-- 预览结果面板 -->
+      <div v-if="previewResult" class="preview-panel">
+        <div class="preview-summary">
+          <el-tag type="info" size="small">{{ previewResult.total_nodes }} 节点</el-tag>
+          <el-tag type="success" size="small">{{ previewResult.leaf_count }} 叶子</el-tag>
+          <el-tag
+            :type="previewResult.conflicts.length > 0 ? 'danger' : 'success'"
+            size="small"
+          >
+            跨 round 冲突 {{ previewResult.conflicts.length }}
+          </el-tag>
+          <el-tag
+            :type="s3MatchedCount(previewResult.s3_probe) === previewResult.leaf_count && previewResult.leaf_count > 0 ? 'success' : 'warning'"
+            size="small"
+          >
+            S3 匹配 {{ s3MatchedCount(previewResult.s3_probe) }} / {{ previewResult.leaf_count }}
+          </el-tag>
+          <el-tag
+            v-if="previewResult.extra_fields_seen.length"
+            size="small"
+          >
+            extra: {{ previewResult.extra_fields_seen.join(', ') }}
+          </el-tag>
+        </div>
+
+        <el-collapse v-model="previewCollapse">
+          <el-collapse-item title="树形预览" name="tree">
+            <div class="tree-preview">
+              <TaskTreeNode :node="previewResult.tree" :depth="0" />
+            </div>
+          </el-collapse-item>
+          <el-collapse-item
+            v-if="previewResult.conflicts.length"
+            title="跨 round 冲突（追加会被拒绝）"
+            name="conflicts"
+          >
+            <el-alert type="error" :closable="false" style="margin-bottom: 8px">
+              以下 Id 已在本 version 的其他轮次存在，追加将被拒绝。请修改 JSON 中的 Id 后重试。
+            </el-alert>
+            <el-table :data="previewResult.conflicts" size="small" max-height="200">
+              <el-table-column prop="node_id" label="冲突 ID" min-width="200" />
+              <el-table-column prop="conflicting_round" label="所在轮次" width="100" align="center">
+                <template #default="{ row }">#{{ row.conflicting_round }}</template>
+              </el-table-column>
+            </el-table>
+          </el-collapse-item>
+          <el-collapse-item
+            v-if="s3MissingCount(previewResult.s3_probe) > 0"
+            title="S3 未匹配的叶子（追加后该叶子将无法创建任务）"
+            name="s3-missing"
+          >
+            <div class="s3-missing">
+              <el-tag
+                v-for="(ok, leafId) in previewResult.s3_probe"
+                :key="leafId"
+                v-show="!ok"
+                size="small"
+                type="warning"
+                style="margin: 2px"
+              >
+                {{ leafId }}
+              </el-tag>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+
+      <template #footer>
+        <el-button @click="appendDialogVisible = false">取消</el-button>
+        <el-button @click="handleAppend()" :loading="appendSubmitting" :disabled="!!previewResult && previewResult.conflicts.length > 0">
+          仅追加
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="appendSubmitting"
+          :disabled="!!previewResult && previewResult.conflicts.length > 0"
+          @click="handleAppend({ alsoCreateTasks: true })"
+        >
+          追加并创建任务
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ═══ v5：查看树形 ═══ -->
+    <el-dialog
+      v-model="viewDialogVisible"
+      :title="viewTree ? `查看树 — 轮次 #${viewTree.round_number} ${viewTree.root_name}` : '加载中...'"
+      width="780px"
+      :close-on-click-modal="false"
+    >
+      <div v-loading="viewLoading">
+        <template v-if="viewTree">
+          <el-row :gutter="12" style="margin-bottom: 12px">
+            <el-col :span="6"><div class="s-stat"><span class="s-num">{{ viewTree.total_nodes }}</span><span class="s-label">总节点</span></div></el-col>
+            <el-col :span="6"><div class="s-stat"><span class="s-num primary">{{ viewTree.leaf_count }}</span><span class="s-label">叶子</span></div></el-col>
+            <el-col :span="12">
+              <div class="s-stat">
+                <span class="s-label">S3 探测</span>
+                <el-switch
+                  v-model="viewIncludeS3"
+                  size="small"
+                  inline-prompt
+                  active-text="开启"
+                  inactive-text="关闭"
+                  style="margin-top: 4px"
+                  @change="toggleViewS3Probe"
+                />
+              </div>
+            </el-col>
+          </el-row>
+          <el-alert
+            v-if="viewTree.note"
+            :title="`备注：${viewTree.note}`"
+            type="info"
+            :closable="false"
+            style="margin-bottom: 12px"
+          />
+          <div class="view-tree-panel">
+            <TaskTreeNode :node="viewTree.tree" :depth="0" :show-s3="viewIncludeS3" />
+          </div>
+        </template>
+      </div>
+    </el-dialog>
+
+    <!-- ═══ v5：改备注 ═══ -->
+    <el-dialog v-model="noteDialogVisible" :title="`改备注 — 轮次 #${noteForm.round}`" width="480px">
+      <el-form :model="noteForm" label-width="60px">
+        <el-form-item label="备注" required>
+          <el-input
+            v-model="noteForm.note"
+            type="textarea"
+            :rows="3"
+            maxlength="200"
+            show-word-limit
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="noteDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleSaveNote">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ═══ v5：批量建任务结果 ═══ -->
+    <el-dialog v-model="createTasksResultVisible" title="批量建任务结果" width="640px">
+      <template v-if="createTasksResult">
+        <el-row :gutter="12" style="margin-bottom: 12px">
+          <el-col :span="8">
+            <div class="s-stat">
+              <span class="s-num success">{{ createTasksResult.created?.length || 0 }}</span>
+              <span class="s-label">新建 Task</span>
+            </div>
+          </el-col>
+          <el-col :span="8">
+            <div class="s-stat">
+              <span class="s-num primary">{{ createTasksResult.linked?.length || 0 }}</span>
+              <span class="s-label">关联已有 Task</span>
+            </div>
+          </el-col>
+          <el-col :span="8">
+            <div class="s-stat">
+              <span class="s-num warning">{{ createTasksResult.skipped?.length || 0 }}</span>
+              <span class="s-label">跳过（S3 无数据）</span>
+            </div>
+          </el-col>
+        </el-row>
+
+        <template v-if="createTasksResult.skipped?.length">
+          <h4 class="result-section-title">
+            <el-icon><Warning /></el-icon> 跳过的叶子（S3 路径不存在或无数据）
+          </h4>
+          <div class="skipped-tags">
+            <el-tag
+              v-for="item in createTasksResult.skipped"
+              :key="item.leaf_id"
+              size="small"
+              type="warning"
+              style="margin: 2px"
+            >
+              {{ item.leaf_id }} ({{ item.name }})
+            </el-tag>
+          </div>
+        </template>
+
+        <template v-if="createTasksResult.created?.length">
+          <h4 class="result-section-title">新建 Task</h4>
+          <el-table :data="createTasksResult.created" size="small" max-height="200">
+            <el-table-column prop="name" label="名称" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="leaf_id" label="Leaf ID" min-width="160" />
+          </el-table>
+        </template>
+      </template>
+      <template #footer>
+        <el-button type="primary" @click="createTasksResultVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -551,4 +1073,62 @@ async function handleCreateTask() {
 .s-num.primary { color: var(--color-primary); }
 .s-num.warning { color: var(--color-warning); }
 .s-num.danger  { color: var(--color-error); }
+
+/* ── v5 JSON 树区块 ── */
+.tree-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.json-textarea :deep(textarea) {
+  font-family: var(--font-mono);
+  font-size: var(--text-small);
+  line-height: 1.5;
+}
+
+.preview-panel {
+  background: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  margin-top: var(--space-md);
+}
+.preview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+.tree-preview,
+.view-tree-panel {
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+
+.s3-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.skipped-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.result-section-title {
+  font-size: var(--text-small);
+  color: var(--text-secondary);
+  margin: var(--space-md) 0 var(--space-xs);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* TaskTreeNode 样式已迁到 @/components/TaskTreeNode.vue */
 </style>
