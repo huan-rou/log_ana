@@ -1,8 +1,29 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { mappingApi, reportApi } from '@/api'
+import {
+  mockVersions,
+  mockPurposesByVersion,
+  mockVersionReports,
+  mockPurposeReports,
+} from '@/api/report.fixtures'
 import AppPageHeader from '@/components/layout/AppPageHeader.vue'
 import AppSection from '@/components/layout/AppSection.vue'
+
+// Mock 开关：URL 加 ?mock=1 或 localStorage.mockReport='1' 即启用；
+// 仅影响本页面，不改后端、不影响其他 API。
+function detectMockMode() {
+  if (typeof window === 'undefined') return false
+  const params = new URLSearchParams(window.location.search)
+  if (params.get('mock') === '1') return true
+  try {
+    return localStorage.getItem('mockReport') === '1'
+  } catch {
+    return false
+  }
+}
+
+const mockMode = ref(detectMockMode())
 
 const versions = ref([])
 const purposes = ref([])
@@ -37,6 +58,10 @@ async function loadPurposes() {
   selectedPurpose.value = ''
   purposes.value = []
   if (!selectedVersion.value) return
+  if (mockMode.value) {
+    purposes.value = mockPurposesByVersion[selectedVersion.value] || []
+    return
+  }
   const { data } = await mappingApi.listPurposes(selectedVersion.value)
   purposes.value = data
 }
@@ -48,6 +73,15 @@ async function loadReport() {
   }
   loading.value = true
   try {
+    if (mockMode.value) {
+      const data = selectedPurpose.value
+        ? mockPurposeReports[selectedPurpose.value]
+        : mockVersionReports[selectedVersion.value]
+      // 模拟一点点网络延迟，让骨架/loading 看起来更真实
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      report.value = data || null
+      return
+    }
     const response = selectedPurpose.value
       ? await reportApi.purpose(selectedPurpose.value)
       : await reportApi.version(selectedVersion.value)
@@ -64,9 +98,13 @@ watch(selectedVersion, async () => {
 watch(selectedPurpose, loadReport)
 
 onMounted(async () => {
-  const { data } = await mappingApi.listVersions()
-  versions.value = data
-  if (data.length) selectedVersion.value = data[0].id
+  if (mockMode.value) {
+    versions.value = mockVersions
+  } else {
+    const { data } = await mappingApi.listVersions()
+    versions.value = data
+  }
+  if (versions.value.length) selectedVersion.value = versions.value[0].id
 })
 </script>
 
@@ -82,6 +120,16 @@ onMounted(async () => {
         </el-select>
       </template>
     </AppPageHeader>
+
+    <el-alert
+      v-if="mockMode"
+      type="info"
+      :closable="false"
+      show-icon
+      class="mock-banner"
+      title="Mock 模式"
+      description="当前展示来自 src/api/report.fixtures.js 的演示数据，未访问后端。关闭方式：去掉 URL 末尾的 ?mock=1，或 localStorage.removeItem('mockReport')。"
+    />
 
     <div v-loading="loading">
       <el-empty v-if="!selectedVersion && !loading" description="暂无测试版本" />
@@ -132,8 +180,8 @@ onMounted(async () => {
           <el-descriptions :column="4" border size="small">
             <el-descriptions-item label="可审核">{{ report.review.eligible }}</el-descriptions-item>
             <el-descriptions-item label="待审核">{{ report.review.pending }}</el-descriptions-item>
-            <el-descriptions-item label="确认">{{ report.review.confirmed }}</el-descriptions-item>
-            <el-descriptions-item label="覆盖">{{ report.review.overridden }}</el-descriptions-item>
+            <el-descriptions-item label="采纳">{{ report.review.confirmed }}</el-descriptions-item>
+            <el-descriptions-item label="未采纳">{{ report.review.overridden }}</el-descriptions-item>
           </el-descriptions>
         </AppSection>
 
@@ -191,6 +239,7 @@ onMounted(async () => {
 
 <style scoped>
 .overall-report { max-width: 1400px; }
+.mock-banner { margin-bottom: var(--space-md); }
 .stat-grid { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: var(--space-md); }
 .stat { border: 1px solid var(--border-light); border-radius: var(--radius-md); padding: var(--space-lg); background: var(--bg-panel); display: grid; gap: var(--space-sm); }
 .stat span { color: var(--text-secondary); font-size: var(--text-small); }
