@@ -18,6 +18,13 @@ from app.models.user import User, UserRole
 from app.models.mapping import TestPurpose, TestVersion, TaskReference
 from app.models.rule import Rule, RuleAuditLog, RuleStatus, RuleMatchSource
 from app.models.task_tree import TestTaskTree, TestTaskNode
+from app.models.purpose_execution import (
+    PurposeExecution,
+    TaskSource,
+    TaskBlock,
+    ExecutionSuite,
+    CaseOccurrence,
+)
 
 __all__ = [
     # task
@@ -45,4 +52,9 @@ __all__ = [
     # task tree (v5)
     "TestTaskTree",
     "TestTaskNode",
+    "PurposeExecution",
+    "TaskSource",
+    "TaskBlock",
+    "ExecutionSuite",
+    "CaseOccurrence",
 ]

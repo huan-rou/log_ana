@@ -61,6 +61,7 @@ const statusOptions = [
   { label: '解析中', value: 'parsing' },
   { label: '分析中', value: 'analyzing' },
   { label: '已完成', value: 'completed' },
+  { label: '完成但有告警', value: 'completed_with_warnings' },
   { label: '失败', value: 'failed' },
 ]
 
@@ -69,6 +70,7 @@ const statusTagType = {
   parsing: 'warning',
   analyzing: '',
   completed: 'success',
+  completed_with_warnings: 'warning',
   failed: 'danger',
 }
 
@@ -77,6 +79,7 @@ const statusLabel = {
   parsing: '解析中',
   analyzing: '分析中',
   completed: '已完成',
+  completed_with_warnings: '完成但有告警',
   failed: '失败',
 }
 
@@ -155,7 +158,7 @@ const batchResultAction = ref('start')  // 'start' | 'rerun' — 决定结果 di
 //   pending + failed → 启动分析；completed + failed → 重新分析
 // 其他状态（parsing / analyzing / fetched）正忙，不能批量触发。
 function isActionable(task) {
-  return task && ['pending', 'failed', 'completed'].includes(task.status)
+  return task && ['pending', 'failed', 'completed', 'completed_with_warnings'].includes(task.status)
 }
 
 function isStartable(task) {
@@ -163,7 +166,7 @@ function isStartable(task) {
 }
 
 function isRerunable(task) {
-  return task && (task.status === 'completed' || task.status === 'failed')
+  return task && ['completed', 'completed_with_warnings', 'failed'].includes(task.status)
 }
 
 const startableCount = computed(() => tasks.value.filter(isStartable).length)

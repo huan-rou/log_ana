@@ -10,6 +10,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.task import AnalysisResult, AnalysisRule, Category, LogFile, Task
+from app.models.purpose_execution import CaseOccurrence, PurposeExecution, TaskBlock, TaskSource
 from app.models.rule import Rule as RuleMeta, RuleStatus
 from app.services import summary_report as sr
 import app.core.audit_logger as audit_log_module
@@ -144,7 +145,7 @@ async def build_current_report(db: AsyncSession, tasks: list[Task]) -> dict:
     report = _empty_report()
     report["tasks"] = {
         "total": len(tasks),
-        "completed": sum(task.status == "completed" for task in tasks),
+        "completed": sum(task.status in {"completed", "completed_with_warnings"} for task in tasks),
     }
     primary_by_file = {
         log_file.id: primary
@@ -329,4 +330,64 @@ def _empty_report() -> dict:
         },
         "rule_statistics": [],
         "exceptions": {"missing_log": [], "no_conclusion": []},
+    }
+
+
+async def build_latest_case_statuses(
+    db: AsyncSession,
+    legacy_tasks: list[Task],
+    purpose_ids: list[str],
+) -> dict[str, str]:
+    """Merge legacy YAML cases with round-aware occurrences by case_id.
+
+    New execution occurrences override matching legacy cases. Cases omitted from
+    a rerun remain in the map with their previous result.
+    """
+    merged: dict[str, tuple[tuple, str]] = {}
+    if legacy_tasks:
+        legacy_files = (await db.execute(
+            select(LogFile).where(LogFile.task_id.in_([task.id for task in legacy_tasks]))
+        )).scalars().all()
+        _, lookups = await _load_file_summaries(legacy_tasks, legacy_files)
+        created = {task.id: task.created_at for task in legacy_tasks}
+        for task_id, _, case in _unique_cases(lookups):
+            case_id = str(case.get("id") or case.get("desc") or "")
+            if not case_id:
+                continue
+            key = (0, created.get(task_id) or 0, task_id)
+            status = _summary_status({"display_result": case.get("result")})
+            if case_id not in merged or key > merged[case_id][0]:
+                merged[case_id] = (key, status)
+
+    if purpose_ids:
+        rows = (await db.execute(
+            select(CaseOccurrence, TaskBlock, TaskSource, PurposeExecution)
+            .join(TaskBlock, CaseOccurrence.task_block_id == TaskBlock.id)
+            .join(TaskSource, TaskBlock.source_id == TaskSource.id)
+            .join(PurposeExecution, TaskSource.execution_id == PurposeExecution.id)
+            .where(PurposeExecution.purpose_id.in_(purpose_ids))
+        )).all()
+        from app.services.purpose_execution import _parse_end_time
+        for occurrence, block, _, execution in rows:
+            key = (
+                1,
+                execution.round_number,
+                _parse_end_time(occurrence.end_time),
+                block.discovery_order,
+                occurrence.discovery_order,
+            )
+            previous = merged.get(occurrence.case_id)
+            if previous is None or key > previous[0]:
+                merged[occurrence.case_id] = (key, occurrence.normalized_status)
+    return {case_id: value[1] for case_id, value in merged.items()}
+
+
+def apply_latest_case_counts(report: dict, statuses: dict[str, str]) -> None:
+    counts = Counter(status if status in {"success", "failed", "blocked"} else "unknown" for status in statuses.values())
+    report["results"] = {
+        "total": len(statuses),
+        "success": counts["success"],
+        "failed": counts["failed"],
+        "blocked": counts["blocked"],
+        "unknown": counts["unknown"],
     }

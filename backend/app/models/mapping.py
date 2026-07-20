@@ -50,6 +50,10 @@ class TestPurpose(Base):
         back_populates="purpose", lazy="selectin",
         order_by="TaskReference.round_number"
     )
+    executions = relationship(
+        "PurposeExecution", cascade="all, delete-orphan", lazy="selectin",
+        order_by="PurposeExecution.round_number",
+    )
 
 
 class TaskReference(Base):

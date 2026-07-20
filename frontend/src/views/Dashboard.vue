@@ -106,6 +106,7 @@ const statusTag = (status) => {
     parsing: 'warning',
     analyzing: 'warning',
     completed: 'success',
+    completed_with_warnings: 'warning',
     failed: 'danger',
   }
   return map[status] || 'info'

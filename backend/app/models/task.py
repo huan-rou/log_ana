@@ -55,7 +55,7 @@ class Task(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     status: Mapped[str] = mapped_column(
         String(32), default="pending", nullable=False
-    )  # pending | fetching | parsing | detecting | classifying | completed | failed
+    )  # pending | parsing | analyzing | completed | completed_with_warnings | failed
 
     # ── 数据来源 ──
     source_type: Mapped[str] = mapped_column(
@@ -87,6 +87,10 @@ class Task(Base):
     # 指向 TestTaskNode.id（叶子节点）；NULL = 未关联或老任务
     tree_node_id: Mapped[Optional[str]] = mapped_column(
         String(12), ForeignKey("test_task_nodes.id"), default=None, index=True
+    )
+    # New multi-source tasks point at a PurposeExecution. Legacy tasks keep NULL.
+    purpose_execution_id: Mapped[Optional[str]] = mapped_column(
+        String(12), ForeignKey("purpose_executions.id"), default=None, index=True
     )
 
     # ── 时间 ──

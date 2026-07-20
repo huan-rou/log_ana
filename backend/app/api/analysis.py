@@ -4,7 +4,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
-from sqlalchemy import select, Integer, text, func
+from sqlalchemy import select, Integer, text, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 from pydantic import BaseModel, Field
@@ -203,6 +203,37 @@ async def _reset_task_data(
         sql_delete(TestCase).where(TestCase.task_id == task_id)
     )).rowcount
 
+    # PurposeExecution derived rows are rebuilt from the immutable raw JSON and
+    # summary reports on rerun. Delete occurrences before LogFile because they
+    # may reference a logfile that is about to be replaced.
+    from app.models.purpose_execution import (
+        CaseOccurrence, ExecutionSuite, PurposeExecution, TaskBlock, TaskSource,
+    )
+    execution_id = (await db.execute(
+        select(Task.purpose_execution_id).where(Task.id == task_id)
+    )).scalar_one_or_none()
+    occurrence_del = 0
+    suite_del = 0
+    if execution_id:
+        source_ids = select(TaskSource.id).where(TaskSource.execution_id == execution_id)
+        block_ids = select(TaskBlock.id).where(TaskBlock.source_id.in_(source_ids))
+        occurrence_del = (await db.execute(
+            sql_delete(CaseOccurrence).where(CaseOccurrence.task_block_id.in_(block_ids))
+        )).rowcount
+        suite_del = (await db.execute(
+            sql_delete(ExecutionSuite).where(ExecutionSuite.task_block_id.in_(block_ids))
+        )).rowcount
+        await db.execute(
+            update(TaskBlock).where(TaskBlock.source_id.in_(source_ids)).values(
+                status="pending", error_message=None
+            )
+        )
+        await db.execute(
+            update(TaskSource).where(TaskSource.execution_id == execution_id).values(
+                status="pending"
+            )
+        )
+
     # 6. ArchivedReview / HighValueRecord（依赖 LogFile）—— 必须在删 LogFile 之前
     arch_del = 0
     hvr_del = 0
@@ -235,6 +266,8 @@ async def _reset_task_data(
         "analysis_results": ar_del,
         "feedback": fb_del,
         "testcases": tc_del,
+        "case_occurrences": occurrence_del,
+        "execution_suites": suite_del,
         "log_files": lf_del,
         "preserve_review": preserve_review,
     }
@@ -268,7 +301,7 @@ async def rerun_task(
     )).scalar_one_or_none()
     if not task:
         raise HTTPException(404, "Task not found")
-    if task.status not in ("completed", "failed"):
+    if task.status not in ("completed", "completed_with_warnings", "failed"):
         raise HTTPException(
             400,
             f"Task is {task.status}; only completed/failed can be rerun. "
@@ -385,7 +418,7 @@ async def rerun_batch(
         if not task:
             errors.append({"task_id": task_id, "reason": "not_found"})
             continue
-        if task.status not in ("completed", "failed"):
+        if task.status not in ("completed", "completed_with_warnings", "failed"):
             skipped.append({
                 "task_id": task_id,
                 "name": task.name,
@@ -459,6 +492,28 @@ async def _run_pipeline(task_id: str):
 
         try:
             # ── Step 1: Parse ──
+            # PurposeExecution tasks aggregate every discovered source/block into
+            # this parent task and have their own strict summary ingestion path.
+            if task.purpose_execution_id:
+                from app.services.purpose_execution import run_execution_pipeline
+
+                task.status = "parsing"
+                await db.commit()
+                terminal_status = await run_execution_pipeline(task, db)
+                task.status = terminal_status
+                task.completed_at = datetime.utcnow()
+                await db.commit()
+                duration_ms = int((_time.monotonic() - t0) * 1000)
+                await audit_logger.pipeline_end(
+                    task_id, status=terminal_status,
+                    total_entries=task.total_entries,
+                    failure_count=task.failure_count,
+                    classified=task.classified_count,
+                    unrecognized=task.unrecognized_count,
+                    duration_ms=duration_ms,
+                )
+                return
+
             task.status = "parsing"
             await _db_checkpoint(db, task_id, "before-parsing-status-commit")
             await db.commit()

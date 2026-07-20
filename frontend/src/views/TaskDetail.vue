@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { taskApi, logApi, analysisApi } from '@/api'
 import ReviewDrawer from '@/components/ReviewDrawer.vue'
+import PurposeExecutionResults from '@/components/PurposeExecutionResults.vue'
 import TreeNode from '@/components/TreeNode.vue'
 import AppPageHeader from '@/components/layout/AppPageHeader.vue'
 import AppSection from '@/components/layout/AppSection.vue'
@@ -22,6 +23,8 @@ const canWriteReview = computed(() => ['analyst', 'reviewer', 'admin'].includes(
 // ── Task ──
 const task = ref(null)
 const loading = ref(true)
+const isPurposeExecution = computed(() => !!task.value?.purpose_execution_id)
+const isTerminal = (status) => ['completed', 'completed_with_warnings', 'failed'].includes(status)
 
 // ── Tabs ──
 const activeTab = ref('files')
@@ -62,7 +65,7 @@ let refreshTimer = null
 
 onMounted(async () => {
   await loadTask()
-  if (task.value?.status === 'completed') loadFiles()
+  if (isTerminal(task.value?.status)) loadFiles()
   startAutoRefresh()
 })
 
@@ -78,7 +81,7 @@ function startAutoRefresh() {
   refreshTimer = setInterval(async () => {
     if (task.value && (task.value.status === 'parsing' || task.value.status === 'analyzing')) {
       await loadTask()
-      if (task.value?.status === 'completed') loadFiles()
+      if (isTerminal(task.value?.status)) loadFiles()
     }
   }, 3000)
 }
@@ -87,7 +90,7 @@ async function loadTask() {
   try {
     const { data } = await taskApi.get(taskId)
     task.value = data
-    if (data.status === 'completed' || data.status === 'failed') {
+    if (isTerminal(data.status)) {
       if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null }
     }
   } catch {
@@ -116,7 +119,7 @@ const rerunResult = ref(null)
 
 function canRerun() {
   // 只有 completed/failed 才能 rerun
-  return task.value && (task.value.status === 'completed' || task.value.status === 'failed')
+  return task.value && isTerminal(task.value.status)
 }
 
 function openRerunDialog() {
@@ -489,11 +492,11 @@ const TaskTreeNodeView = {
 }
 
 function handleTabChange(tab) {
-  if (tab === 'files' && files.value.length === 0) loadFiles()
+  if (tab === 'files' && !isPurposeExecution.value && files.value.length === 0) loadFiles()
   if (tab === 'raw' && rawLog.value.total_lines === 0) loadRawLog()
   if (tab === 'explorer') loadExplorerFiles()
   if (tab === 'failures' && failures.value.length === 0) loadFailures()
-  if (tab === 'tree' && !treeViewLoaded.value) loadJsonTreeView()
+  if (tab === 'tree' && !isPurposeExecution.value && !treeViewLoaded.value) loadJsonTreeView()
 }
 
 // 任务刷新后重新加载 JSON 树视图（task.tree_node_id 可能变化）
@@ -533,11 +536,12 @@ async function jumpToExplorer(fileId) {
 }
 
 const statusTag = (s) => {
-  const map = { pending: 'info', parsing: 'warning', analyzing: '', completed: 'success', failed: 'danger' }
+  const map = { pending: 'info', parsing: 'warning', analyzing: '', completed: 'success', completed_with_warnings: 'warning', failed: 'danger' }
   return map[s] || 'info'
 }
 
 const statusLabel = (s) => {
+  if (s === 'completed_with_warnings') return '完成但有告警'
   const map = { pending: '待处理', parsing: '解析中', analyzing: '分析中', completed: '已完成', failed: '失败' }
   return map[s] || s
 }
@@ -708,7 +712,7 @@ const s3PathText = computed(() => {
     <el-alert
       v-if="task?.error_message"
       :title="task.error_message"
-      type="error"
+      :type="task.status === 'completed_with_warnings' ? 'warning' : 'error'"
       :closable="false"
       class="error-msg"
     />
@@ -825,7 +829,7 @@ const s3PathText = computed(() => {
     <AppSection title="分析详情" hint="切换 Tab 查看不同维度的数据">
       <el-tabs v-model="activeTab" @tab-change="handleTabChange">
         <!-- ═══ v5：JSON 树视图（按轮次）═══ -->
-        <el-tab-pane label="JSON 树视图" name="tree">
+        <el-tab-pane v-if="!isPurposeExecution" label="JSON 树视图" name="tree">
           <div v-if="!hasTree" class="tree-view-empty">
             <el-empty
               description="该任务未关联 JSON 树（Task.tree_node_id 为空）"
@@ -1147,6 +1151,13 @@ const s3PathText = computed(() => {
 
         <!-- Analyzed Files Tab -->
         <el-tab-pane label="分析结果" name="files">
+          <PurposeExecutionResults
+            v-if="isPurposeExecution"
+            :execution-id="task.purpose_execution_id"
+            @open-log="jumpToExplorer"
+            @open-review="(id) => openReview({ id })"
+          />
+          <div v-else class="legacy-results">
           <div class="results-toolbar">
             <el-tooltip content="按审核状态过滤" placement="top">
               <el-select v-model="statusFilter" placeholder="审核状态" clearable style="width: 140px" @change="loadFiles">
@@ -1273,6 +1284,7 @@ const s3PathText = computed(() => {
               </template>
             </el-table-column>
           </el-table>
+          </div>
         </el-tab-pane>
 
         <!-- Raw Log Tab -->

@@ -383,6 +383,9 @@ async def _apply_manual_migrations() -> None:
     statements = [
         # v5: tasks.tree_node_id
         "ALTER TABLE tasks ADD COLUMN tree_node_id VARCHAR(12)",
+        # v7: multi-source purpose executions
+        "ALTER TABLE tasks ADD COLUMN purpose_execution_id VARCHAR(12)",
+        "CREATE INDEX IF NOT EXISTS ix_tasks_purpose_execution_id ON tasks (purpose_execution_id)",
     ]
     async with engine.begin() as conn:
         for stmt in statements:

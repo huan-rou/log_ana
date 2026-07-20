@@ -5,7 +5,7 @@ import {
   Plus, Search, View, Edit, Delete, Connection,
   Document, Refresh, FolderAdd, CircleClose, Warning,
 } from '@element-plus/icons-vue'
-import api, { mappingApi } from '@/api'
+import api, { mappingApi, purposeExecutionApi } from '@/api'
 import AppPageHeader from '@/components/layout/AppPageHeader.vue'
 import AppSection from '@/components/layout/AppSection.vue'
 import TaskTreeNode from '@/components/TaskTreeNode.vue'
@@ -42,6 +42,67 @@ const taskDialogVisible = ref(false)
 const taskPurposeName = ref('')
 const taskPurposeId = ref(null)
 const taskCreating = ref(false)
+
+const executionDialogVisible = ref(false)
+const executionSubmitting = ref(false)
+const executionPreviewing = ref(false)
+const executionPreview = ref(null)
+const createdExecution = ref(null)
+const executionPurpose = ref(null)
+const executionForm = ref({ external_task_id: '', json: '', note: '' })
+
+watch(
+  () => [executionForm.value.external_task_id, executionForm.value.json],
+  () => {
+    if (!executionSubmitting.value) executionPreview.value = null
+  },
+)
+
+function openPurposeExecution(purpose) {
+  executionPurpose.value = purpose
+  executionForm.value = { external_task_id: '', json: '', note: '' }
+  executionPreview.value = null
+  createdExecution.value = null
+  executionDialogVisible.value = true
+}
+
+async function previewPurposeExecution() {
+  if (!executionForm.value.external_task_id.trim() || !executionForm.value.json.trim()) {
+    ElMessage.warning('请填写外部任务 ID 并粘贴 JSON')
+    return
+  }
+  executionPreviewing.value = true
+  try {
+    const { data } = await purposeExecutionApi.preview({
+      purpose_id: executionPurpose.value.id,
+      external_task_id: executionForm.value.external_task_id.trim(),
+      json: executionForm.value.json,
+    })
+    executionPreview.value = data
+  } finally {
+    executionPreviewing.value = false
+  }
+}
+
+async function createPurposeExecution() {
+  if (!executionPreview.value) {
+    ElMessage.warning('请先完成预览')
+    return
+  }
+  executionSubmitting.value = true
+  try {
+    const { data } = await purposeExecutionApi.create({
+      purpose_id: executionPurpose.value.id,
+      external_task_id: executionForm.value.external_task_id.trim(),
+      json: executionForm.value.json,
+      note: executionForm.value.note.trim() || null,
+    })
+    createdExecution.value = data
+    ElMessage.success(`已创建第 ${data.round_number} 轮待运行分析任务`)
+  } finally {
+    executionSubmitting.value = false
+  }
+}
 
 onMounted(loadVersions)
 
@@ -631,9 +692,10 @@ function s3MissingCount(probe) {
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right" align="center">
+            <el-table-column label="操作" width="290" fixed="right" align="center">
               <template #default="{ row }">
                 <el-button link type="primary" size="small" @click="openEditPurpose(row)">编辑</el-button>
+                <el-button link type="success" size="small" @click="openPurposeExecution(row)">新建轮次</el-button>
                 <el-button link type="success" size="small" @click="openCreateTask(row)">创建任务</el-button>
                 <el-button link type="primary" size="small" @click="handleStats(row)">统计</el-button>
                 <el-button link type="danger" size="small" @click="handleDeletePurpose(row)">删除</el-button>
@@ -688,6 +750,71 @@ function s3MissingCount(probe) {
       </template>
     </el-dialog>
 
+    <el-dialog
+      v-model="executionDialogVisible"
+      :title="createdExecution ? '执行轮次已创建' : `新建目的执行轮次：${executionPurpose?.name || ''}`"
+      width="760px"
+      :close-on-click-modal="false"
+    >
+      <template v-if="createdExecution">
+        <el-result icon="success" title="待运行分析任务已创建">
+          <template #sub-title>
+            第 {{ createdExecution.round_number }} 轮，{{ createdExecution.leaf_count }} 个来源，{{ createdExecution.block_count }} 个任务块
+          </template>
+          <template #extra>
+            <el-button type="primary" tag="router-link" :to="`/tasks/${createdExecution.task_id}`">查看并运行任务</el-button>
+          </template>
+        </el-result>
+      </template>
+      <template v-else>
+        <el-form :model="executionForm" label-width="100px">
+          <el-form-item label="外部任务 ID" required>
+            <el-input v-model="executionForm.external_task_id" placeholder="用于后续接入 JSON 查询适配器" />
+          </el-form-item>
+          <el-form-item label="轮次备注">
+            <el-input v-model="executionForm.note" maxlength="200" show-word-limit placeholder="本轮执行说明" />
+          </el-form-item>
+          <el-form-item label="执行树 JSON" required>
+            <el-input
+              v-model="executionForm.json"
+              type="textarea"
+              :rows="10"
+              spellcheck="false"
+              placeholder="当前版本请手工粘贴 JSON。叶子 Name 作为特性名称，Id 用于定位 S3 task_id。"
+            />
+          </el-form-item>
+        </el-form>
+        <div class="execution-actions">
+          <el-button :loading="executionPreviewing" @click="previewPurposeExecution">预览并探测任务块</el-button>
+        </div>
+        <div v-if="executionPreview" class="execution-preview">
+          <div class="preview-summary">
+            <el-tag type="success" size="small">{{ executionPreview.leaf_count }} 个来源</el-tag>
+            <el-tag :type="executionPreview.block_count ? 'primary' : 'warning'" size="small">{{ executionPreview.block_count }} 个任务块</el-tag>
+            <el-tag v-if="executionPreview.warnings.length" type="warning" size="small">{{ executionPreview.warnings.length }} 条探测告警</el-tag>
+          </div>
+          <el-table :data="executionPreview.sources" size="small" max-height="240" empty-text="未解析到来源">
+            <el-table-column prop="name" label="特性" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="task_id" label="Task ID" min-width="180" show-overflow-tooltip />
+            <el-table-column label="任务块" width="90" align="right"><template #default="{ row }">{{ row.blocks.length }}</template></el-table-column>
+            <el-table-column label="探测结果" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }"><span :class="row.errors.length ? 'text-danger' : 'text-muted'">{{ row.errors.join('; ') || '可用' }}</span></template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="executionDialogVisible = false">关闭</el-button>
+        <el-button
+          v-if="!createdExecution"
+          type="primary"
+          :loading="executionSubmitting"
+          :disabled="!executionPreview"
+          @click="createPurposeExecution"
+        >创建待运行任务</el-button>
+      </template>
+    </el-dialog>
+
     <!-- Stats Dialog -->
     <el-dialog v-model="statsDialogVisible" :title="statsData ? '聚合统计 — ' + statsData.purpose_name : '加载中...'" width="700px">
       <div v-loading="statsLoading">
@@ -710,7 +837,7 @@ function s3MissingCount(probe) {
               <el-table-column prop="s3_task_id" label="S3 Task ID" min-width="180" show-overflow-tooltip />
               <el-table-column prop="status" label="状态" width="80">
                 <template #default="{ row }">
-                  <el-tag :type="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'danger' : 'info'" size="small">{{ row.status }}</el-tag>
+                  <el-tag :type="row.status === 'completed' ? 'success' : row.status === 'completed_with_warnings' ? 'warning' : row.status === 'failed' ? 'danger' : 'info'" size="small">{{ row.status }}</el-tag>
                 </template>
               </el-table-column>
               <el-table-column prop="files" label="文件数" width="72" align="center" />
@@ -1099,6 +1226,9 @@ function s3MissingCount(probe) {
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
 }
+.execution-actions { display: flex; justify-content: flex-end; margin-bottom: var(--space-md); }
+.execution-preview { border-top: 1px solid var(--border-light); padding-top: var(--space-md); }
+.text-danger { color: var(--color-error); }
 .tree-preview,
 .view-tree-panel {
   max-height: 360px;

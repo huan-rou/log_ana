@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.mapping import TestVersion, TestPurpose, TaskReference
+from app.models.purpose_execution import PurposeExecution
 from app.models.user import User
 from app.auth import require_admin
 
@@ -256,6 +257,12 @@ async def delete_purpose(
     )).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "测试目的不存在")
+
+    execution_id = (await db.execute(
+        select(PurposeExecution.id).where(PurposeExecution.purpose_id == p.id).limit(1)
+    )).scalar_one_or_none()
+    if execution_id:
+        raise HTTPException(409, "该测试目的已有执行轮次，不能直接删除")
 
     # Delete task_refs first
     refs = (await db.execute(
@@ -917,4 +924,3 @@ async def update_tree_note(
         version_id, round_number, len(req.note),
     )
     return {"ok": True, "round_number": round_number, "note": tree.note}
-

@@ -249,3 +249,14 @@ export const reportApi = {
   version: (versionId) => api.get(`/reports/versions/${versionId}`),
   purpose: (purposeId) => api.get(`/reports/purposes/${purposeId}`),
 }
+
+export const purposeExecutionApi = {
+  preview: (data) => api.post('/purpose-executions/preview', data, { timeout: 120000 }),
+  create: (data) => api.post('/purpose-executions', data, { timeout: 120000 }),
+  list: (params = {}) => api.get('/purpose-executions', { params }),
+  get: (id) => api.get(`/purpose-executions/${id}`),
+  suites: (id, params = {}) => api.get(`/purpose-executions/${id}/suites`, { params }),
+  testcases: (id, params = {}) => api.get(`/purpose-executions/${id}/testcases`, { params }),
+  testcaseHistory: (id, caseId) =>
+    api.get(`/purpose-executions/${id}/testcase-history`, { params: { case_id: caseId } }),
+}

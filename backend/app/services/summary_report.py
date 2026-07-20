@@ -28,13 +28,15 @@ def stem(name: str) -> str:
 def normalize_status(result) -> tuple[str, str]:
     """返回 (display_result, normalized_status)。
 
-    已知状态（不区分大小写）：Success/failed/blocked；其余保留原文但归为 blocked。
+    只有明确的 success/failed/blocked 进入对应统计；其余保留原文并归为 unknown。
     """
     raw = str(result or "").strip()
     low = raw.lower()
     if low in ("success", "failed", "blocked"):
         return raw, low
-    return raw, "blocked"
+    # Unknown producer values must remain visible as data-quality warnings. They
+    # are not equivalent to an explicitly blocked testcase.
+    return raw, "unknown"
 
 
 def last_fail_line(detail) -> str:

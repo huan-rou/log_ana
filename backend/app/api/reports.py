@@ -9,7 +9,11 @@ from app.database import get_db
 from app.models.mapping import TaskReference, TestPurpose, TestVersion
 from app.models.task import Task
 from app.models.user import User
-from app.services.overall_report import build_current_report
+from app.services.overall_report import (
+    apply_latest_case_counts,
+    build_current_report,
+    build_latest_case_statuses,
+)
 
 router = APIRouter()
 
@@ -18,11 +22,23 @@ async def _completed_version_tasks(db: AsyncSession, version: TestVersion, task_
     query = select(Task).where(
         Task.package_version == version.version_name,
         Task.source_type == "s3",
-        Task.status == "completed",
+        Task.status.in_(("completed", "completed_with_warnings")),
     )
     if task_ids is not None:
         query = query.where(Task.automation_task_id.in_(task_ids))
     return (await db.execute(query)).scalars().all()
+
+
+async def _purpose_execution_tasks(db: AsyncSession, purpose_ids: list[str]):
+    from app.models.purpose_execution import PurposeExecution
+    return (await db.execute(
+        select(Task)
+        .join(PurposeExecution, Task.purpose_execution_id == PurposeExecution.id)
+        .where(
+            PurposeExecution.purpose_id.in_(purpose_ids or [""]),
+            Task.status.in_(("completed", "completed_with_warnings")),
+        )
+    )).scalars().all()
 
 
 @router.get("/versions/{version_id}")
@@ -37,18 +53,26 @@ async def version_report(
     if not version:
         raise HTTPException(404, "Version not found")
 
-    tasks = await _completed_version_tasks(db, version)
-    report = await build_current_report(db, tasks)
     purposes = (await db.execute(
         select(TestPurpose).where(TestPurpose.version_id == version.id).order_by(TestPurpose.name)
     )).scalars().all()
+    purpose_ids = [purpose.id for purpose in purposes]
+    legacy_tasks = [task for task in await _completed_version_tasks(db, version) if not task.purpose_execution_id]
+    tasks = legacy_tasks + await _purpose_execution_tasks(db, purpose_ids)
+    report = await build_current_report(db, tasks)
+    apply_latest_case_counts(report, await build_latest_case_statuses(db, legacy_tasks, purpose_ids))
     purpose_rows = []
     for purpose in purposes:
         refs = (await db.execute(
             select(TaskReference.task_id).where(TaskReference.purpose_id == purpose.id)
         )).scalars().all()
-        purpose_tasks = await _completed_version_tasks(db, version, refs)
+        purpose_legacy_tasks = [task for task in await _completed_version_tasks(db, version, refs) if not task.purpose_execution_id]
+        purpose_tasks = purpose_legacy_tasks + await _purpose_execution_tasks(db, [purpose.id])
         purpose_report = await build_current_report(db, purpose_tasks)
+        apply_latest_case_counts(
+            purpose_report,
+            await build_latest_case_statuses(db, purpose_legacy_tasks, [purpose.id]),
+        )
         purpose_rows.append({
             "id": purpose.id,
             "name": purpose.name,
@@ -81,7 +105,13 @@ async def purpose_report(
     refs = (await db.execute(
         select(TaskReference.task_id).where(TaskReference.purpose_id == purpose.id)
     )).scalars().all()
-    report = await build_current_report(db, await _completed_version_tasks(db, version, refs))
+    legacy_tasks = [task for task in await _completed_version_tasks(db, version, refs) if not task.purpose_execution_id]
+    tasks = legacy_tasks + await _purpose_execution_tasks(db, [purpose.id])
+    report = await build_current_report(db, tasks)
+    apply_latest_case_counts(
+        report,
+        await build_latest_case_statuses(db, legacy_tasks, [purpose.id]),
+    )
     report["scope"] = {
         "type": "purpose", "id": purpose.id, "name": purpose.name,
         "version_id": version.id, "version_name": version.version_name,
