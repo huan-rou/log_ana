@@ -18,7 +18,7 @@ onMounted(() => {
     const cached = localStorage.getItem('user')
     if (cached) currentUser.value = JSON.parse(cached)
   } catch {}
-  refreshUser()
+  if (!route.meta.guest) refreshUser()
 })
 
 async function refreshUser() {

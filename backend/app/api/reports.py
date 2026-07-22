@@ -29,7 +29,7 @@ async def _completed_version_tasks(db: AsyncSession, version: TestVersion, task_
     return (await db.execute(query)).scalars().all()
 
 
-async def _purpose_execution_tasks(db: AsyncSession, purpose_ids: list[str]):
+async def _purpose_execution_tasks(db: AsyncSession, purpose_ids: list):
     from app.models.purpose_execution import PurposeExecution
     return (await db.execute(
         select(Task)

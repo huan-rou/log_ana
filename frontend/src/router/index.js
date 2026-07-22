@@ -32,6 +32,12 @@ const routes = [
     meta: { title: '任务详情', breadcrumb: '任务详情' },
   },
   {
+    path: '/mock/purpose-execution',
+    name: 'PurposeExecutionMock',
+    component: () => import('@/views/PurposeExecutionMock.vue'),
+    meta: { guest: true, title: '目的执行 UI Mock', breadcrumb: 'UI Mock' },
+  },
+  {
     path: '/review',
     name: 'ReviewDashboard',
     component: () => import('@/views/ReviewDashboard.vue'),

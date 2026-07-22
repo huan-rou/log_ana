@@ -4,6 +4,7 @@ import { purposeExecutionApi } from '@/api'
 
 const props = defineProps({
   executionId: { type: String, required: true },
+  mockData: { type: Object, default: null },
 })
 const emit = defineEmits(['open-log', 'open-review'])
 
@@ -33,10 +34,39 @@ function queryParams(includeCase = false) {
   return params
 }
 
+function contains(value, keyword) {
+  return String(value || '').toLowerCase().includes(String(keyword || '').trim().toLowerCase())
+}
+
+function mockSuiteRows() {
+  return (props.mockData?.suites || []).filter((row) => {
+    if (filters.value.status && row.block_status !== filters.value.status && row.suite_normalized_status !== filters.value.status) return false
+    if (filters.value.feature && !contains(row.feature, filters.value.feature)) return false
+    if (filters.value.suite && !contains(row.suite_name, filters.value.suite)) return false
+    return true
+  })
+}
+
+function mockTestcaseRows() {
+  return (props.mockData?.testcases || []).filter((row) => {
+    if (filters.value.status && row.last_normalized_status !== filters.value.status) return false
+    if (filters.value.feature && !contains(row.first_feature, filters.value.feature)) return false
+    if (filters.value.suite && !contains(row.last_suite, filters.value.suite)) return false
+    if (filters.value.case_id && !contains(row.case_id, filters.value.case_id)) return false
+    return true
+  })
+}
+
 async function loadResults() {
   loading.value = true
   errorMessage.value = ''
   try {
+    if (props.mockData) {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+      if (activeDimension.value === 'suites') suites.value = mockSuiteRows()
+      else testcases.value = mockTestcaseRows()
+      return
+    }
     if (activeDimension.value === 'suites') {
       const { data } = await purposeExecutionApi.suites(props.executionId, queryParams())
       suites.value = Array.isArray(data) ? data : []
@@ -57,6 +87,11 @@ async function handleExpand(row, expandedRows) {
   historyLoading.value[row.case_id] = true
   historyErrors.value[row.case_id] = ''
   try {
+    if (props.mockData) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      histories.value[row.case_id] = props.mockData.histories?.[row.case_id] || []
+      return
+    }
     const { data } = await purposeExecutionApi.testcaseHistory(props.executionId, row.case_id)
     histories.value[row.case_id] = Array.isArray(data) ? data : []
   } catch (error) {
